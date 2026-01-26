@@ -21,7 +21,7 @@ export const CatAvatar: React.FC = () => {
   const dragOffset = useRef({ x: 0, y: 0 });
   const [bubbles, setBubbles] = useState<{x:number, y:number, id: number}[]>([]);
 
-  // *** Skin Filter ***
+  // Skin Filter
   const getSkinFilter = () => {
       switch (currentSkin) {
           case 'black': return 'brightness(0.4) grayscale(100%)';

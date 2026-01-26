@@ -5,7 +5,9 @@ import { CatAvatar } from './CatAvatar';
 
 export const CatSystem: React.FC = () => {
   const { 
-    moveCat, isDragging, spawnedItem, activeToy, placedItems, currentRoom, 
+    moveCat, isDragging, spawnedItem, activeToy, 
+    placedItems, // *** เปลี่ยนจาก placedDecorations เป็น placedItems ***
+    currentRoom, 
     setCatAction, clearSpawnedItem, clearActiveToy, updateStats, setActiveToy, catAction,
     interactionMode, moveFurniture, particles
   } = useCatGame();
@@ -16,7 +18,6 @@ export const CatSystem: React.FC = () => {
   const containerDragOffset = useRef({ x: 0, y: 0 });
 
   const handleContainerMouseDown = (e: React.MouseEvent) => {
-      // *** ขยับห้องได้เฉพาะโหมดแต่งห้อง ***
       if (interactionMode !== 'EDIT_FURNITURE') return;
       if (draggedFurniture) return;
       e.preventDefault(); setIsContainerDragging(true);
@@ -136,11 +137,12 @@ export const CatSystem: React.FC = () => {
       setActiveToy(prev => prev ? { ...prev, isDragging: true } : null);
   };
 
-  // Idle Logic (Updated for Room)
+  // Idle Logic
   useEffect(() => {
     if (spawnedItem || activeToy || isDragging || interactionMode === 'EDIT_FURNITURE') return;
     const idleLoop = setInterval(() => {
       if (Math.random() > 0.6) { 
+        // หาเตียงจากรายการที่วาง (placedItems)
         const bed = placedItems.find(p => p.itemId.includes('bed'));
         if (bed) moveCat(bed.x + 30, bed.y - 30, 3000, () => setCatAction('SLEEPING'));
         else moveCat(GAME_WIDTH / 2 - 40, GAME_HEIGHT - 100, 3000, () => setCatAction('SLEEPING'));
@@ -159,16 +161,14 @@ export const CatSystem: React.FC = () => {
         style={{
             position: 'fixed', left: containerPos.x, top: containerPos.y,
             width: GAME_WIDTH, height: GAME_HEIGHT, zIndex: 9990,
-            overflow: 'visible', // *** ให้แมวทะลุออกไปได้ ***
+            overflow: 'visible',
             cursor: interactionMode === 'EDIT_FURNITURE' ? 'move' : 'default',
-            // *** แสดงกรอบเฉพาะตอนแต่งห้อง ***
             border: interactionMode === 'EDIT_FURNITURE' ? '2px dashed rgba(0,0,0,0.3)' : 'none'
         }}
     >
-      {/* Background Room */}
       <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: `url(${currentRoom})`, backgroundSize: 'cover', backgroundPosition: 'center', zIndex: 0, borderRadius: '15px', overflow: 'hidden', pointerEvents: 'none' }} />
 
-      {/* Furniture */}
+      {/* Render Furniture from placedItems */}
       {placedItems.map(p => {
           const item = SHOP_ITEMS.find(i => i.id === p.itemId);
           if(!item) return null;
@@ -176,16 +176,12 @@ export const CatSystem: React.FC = () => {
             style={{ position:'absolute', left:p.x, top:p.y, width:'100px', zIndex:1, imageRendering:'pixelated', cursor: interactionMode==='EDIT_FURNITURE'?'move':'default', border: (interactionMode==='EDIT_FURNITURE' && draggedFurniture===p.instanceId)?'2px dashed blue':'none' }} />
       })}
 
-      {/* Toy */}
       {activeToy && <img src={activeToy.item.image} onMouseDown={handleToyMouseDown} style={{ position:'absolute', left:activeToy.x, top:activeToy.y, width:'48px', zIndex:10, cursor:'grab', imageRendering:'pixelated', transform: (activeToy.item.id.includes('mouse')&&activeToy.vx<0)?'scaleX(-1)':'none' }} />}
       
-      {/* Cat */}
       <CatAvatar />
 
-      {/* Food */}
       {spawnedItem && <img src={spawnedItem.item.image} style={{ position:'absolute', left:spawnedItem.x, top:spawnedItem.y, width:'50px', zIndex:15, animation:'bounce 1s infinite', imageRendering:'pixelated' }} />}
       
-      {/* Particles */}
       {particles.map(p => (
           <div key={p.id} style={{ position: 'absolute', left: p.x, top: p.y, pointerEvents: 'none', fontSize: '20px', animation: 'floatUp 1s forwards', opacity: p.life / 100, zIndex: 10002 }}>
               {p.type === 'heart' && '💖'} {p.type === 'sparkle' && '✨'} {p.type === 'dust' && '💨'}

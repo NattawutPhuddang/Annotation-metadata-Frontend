@@ -1,11 +1,12 @@
 // src/context/CatGameContext.tsx
 import React, { createContext, useContext, useState, ReactNode, useRef, useEffect } from 'react';
+import { API_BASE } from '../api/client'; // Import API_BASE
 
 // === CONSTANTS ===
 export const GAME_WIDTH = 400;
 export const GAME_HEIGHT = 300;
 
-// === 1. Types Definitions ===
+// === Types ===
 export type CatAction = 'IDLE' | 'WALKING' | 'SITTING' | 'SLEEPING' | 'DRAGGED' | 'FALLING' | 'EATING' | 'PLAYING' | 'CHASING' | 'POKING';
 export type InteractionMode = 'NORMAL' | 'BRUSH' | 'EDIT_FURNITURE';
 export type CatDirection = 'left' | 'right';
@@ -23,28 +24,23 @@ export interface ActiveToyState { id: string; x: number; y: number; vx: number; 
 export interface CatStats { hunger: number; happiness: number; hygiene: number; }
 export interface Particle { id: number; x: number; y: number; type: 'heart' | 'sparkle' | 'dust' | 'note'; life: number; }
 
-// === 2. Shop Data ===
+// === Shop Data (เหมือนเดิม) ===
 export const SHOP_ITEMS: GameItem[] = [
-  // Foods
+  // ... (รายการสินค้าเดิม Copy มาวางได้เลยครับ หรือใช้ของเดิม) ...
   { id: 'meo', name: 'อาหารเม็ด Me-o', price: 100, type: 'food', effect: { hunger: 15, happiness: 5 }, image: '/CatItems/CatToys/catfood.png' },
   { id: 'caneva', name: 'ปลาสด Caneva', price: 250, type: 'food', effect: { hunger: 20, happiness: 10 }, image: '/CatItems/CatToys/fish.png' },
   { id: 'wet_food', name: 'อาหารเปียก', price: 50, type: 'food', effect: { hunger: 5, happiness: 5 }, image: '/CatItems/CatToys/CatBowls.png' },
-  // Toys
   { id: 'ball', name: 'ลูกบอลเด้งดึ๋ง', price: 1500, type: 'toy', effect: { happiness: 20, hunger: -5 }, image: '/CatItems/CatToys/BlueBall.gif' },
   { id: 'orange_ball', name: 'บอลส้มซิ่ง', price: 1500, type: 'toy', effect: { happiness: 20, hunger: -5 }, image: '/CatItems/CatToys/OrangeBall.gif' },
   { id: 'mouse_toy', name: 'หนูไขลาน', price: 2500, type: 'toy', effect: { happiness: 30, hunger: -10 }, image: '/CatItems/CatToys/Mouse.gif' },
-  // Furniture
   { id: 'bed_blue', name: 'เตียงฟ้า', price: 5000, type: 'decoration', effect: { happiness: 50 }, image: '/CatItems/Beds/CatBedBlue.png' },
   { id: 'bed_pink', name: 'เตียงชมพู', price: 5000, type: 'decoration', effect: { happiness: 50 }, image: '/CatItems/Beds/CatBedPink.png' },
   { id: 'cat_condo', name: 'คอนโดแมว', price: 8000, type: 'decoration', effect: { happiness: 80 }, image: '/CatItems/Beds/CatHomes.png' },
-  // Rooms
   { id: 'room_1', name: 'ห้องนั่งเล่น', price: 2000, type: 'room', effect: { happiness: 10 }, image: '/CatItems/Rooms/Room1.png' },
   { id: 'room_2', name: 'ห้องครัว', price: 3000, type: 'room', effect: { happiness: 15 }, image: '/CatItems/Rooms/Room2.png' },
   { id: 'room_3', name: 'ห้องนอน', price: 4000, type: 'room', effect: { happiness: 20 }, image: '/CatItems/Rooms/Room3.png' },
-  // Accessories
   { id: 'sunglasses', name: 'แว่นสุดเท่', price: 500, type: 'accessory', effect: { happiness: 20 }, image: 'https://cdn-icons-png.flaticon.com/512/186/186315.png' },
   { id: 'tophat', name: 'หมวกมายากล', price: 800, type: 'accessory', effect: { happiness: 30 }, image: 'https://cdn-icons-png.flaticon.com/512/10673/10673445.png' },
-  // Skins
   { id: 'skin_default', name: 'ลายสลิด (Original)', price: 1000, type: 'skin', skinValue: 'default', effect: {}, image: '/Pochi/AllCats.png' },
   { id: 'skin_black', name: 'แมวดำนำโชค', price: 1000, type: 'skin', skinValue: 'black', effect: {}, image: '/Pochi/AllCatsBlack.png' },
   { id: 'skin_orange', name: 'แมวส้มตัวตึง', price: 1000, type: 'skin', skinValue: 'orange', effect: {}, image: '/Pochi/AllCatsOrange.png' },
@@ -92,12 +88,12 @@ interface CatGameState {
 
 const CatGameContext = createContext<CatGameState | undefined>(undefined);
 
-// *** แก้ไข 1: เพิ่ม userId ใน props ***
 export const CatGameProvider: React.FC<{ children: ReactNode; userId?: string }> = ({ children, userId = 'guest' }) => {
   const [catPosition, setCatPositionState] = useState({ x: GAME_WIDTH/2 - 40, y: GAME_HEIGHT - 100 });
   const [catAction, setCatAction] = useState<CatAction>('IDLE');
   const [direction, setDirection] = useState<CatDirection>('right');
   const [isDragging, setIsDragging] = useState(false);
+  
   const [catPoints, setCatPoints] = useState(1500);
   const [catStats, setCatStats] = useState({ hunger: 50, happiness: 50, hygiene: 50 });
   const [inventory, setInventory] = useState<string[]>([]);
@@ -111,6 +107,9 @@ export const CatGameProvider: React.FC<{ children: ReactNode; userId?: string }>
   const [currentSkin, setCurrentSkin] = useState<CatSkin>('default');
   const [particles, setParticles] = useState<Particle[]>([]);
   const [isDarkMode, setIsDarkMode] = useState(false);
+
+  // Lock เพื่อป้องกันการเซฟทับตอนโหลด
+  const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
 
   useEffect(() => {
     const matchDark = window.matchMedia('(prefers-color-scheme: dark)');
@@ -126,42 +125,78 @@ export const CatGameProvider: React.FC<{ children: ReactNode; userId?: string }>
     return () => clearInterval(interval);
   }, [particles.length]);
 
-  // === แก้ไข 2: โหลดข้อมูลตาม userId ===
+  // === SYSTEM: LOAD (อ่านเซฟจาก Server) ===
   useEffect(() => {
-    const key = `catGameData_${userId}`; // ชื่อเซฟเป็น catGameData_EMP001
-    const saved = localStorage.getItem(key);
-    if (saved) {
-        try {
-            const parsed = JSON.parse(saved);
-            setCatPoints(parsed.catPoints ?? 1500);
-            setCatStats(parsed.catStats ?? { hunger: 50, happiness: 50, hygiene: 50 });
-            setInventory(parsed.inventory ?? []);
-            setEquippedItems(parsed.equippedItems ?? []);
-            setPlacedItems(parsed.placedItems ?? []);
-            setCurrentRoom(parsed.currentRoom ?? '/CatItems/Rooms/Room1.png');
-            setCurrentSkin(parsed.currentSkin ?? 'default');
-        } catch(e) { console.error(e); }
-    } else {
-        // *** ถ้าเป็น User ใหม่ ให้สุ่มสีแมว ***
-        const skins: CatSkin[] = ['black', 'orange', 'grey', 'white', 'calico', 'default'];
-        const randomSkin = skins[Math.floor(Math.random() * skins.length)];
-        setCurrentSkin(randomSkin);
-        
-        // Reset ค่าเป็นค่าเริ่มต้น
-        setCatPoints(1500);
-        setInventory([]);
-        setEquippedItems([]);
-        setPlacedItems([]);
-        setCatStats({ hunger: 50, happiness: 50, hygiene: 50 });
-        setCurrentRoom('/CatItems/Rooms/Room1.png');
-    }
-  }, [userId]); // ทำงานเมื่อ userId เปลี่ยน
+    setLoadedUserId(null); // ล็อกการเซฟชั่วคราว
 
-  // === แก้ไข 3: บันทึกข้อมูลตาม userId ===
+    const loadGameData = async () => {
+        try {
+            // เรียก API Load
+            const res = await fetch(`${API_BASE}/api/game/load?userId=${userId}`);
+            
+            if (res.ok) {
+                const data = await res.json();
+                console.log(`[Game] Loaded save for ${userId} from Server`);
+                
+                // Restore State
+                setCatPoints(data.catPoints ?? 1500);
+                setCatStats(data.catStats ?? { hunger: 50, happiness: 50, hygiene: 50 });
+                setInventory(data.inventory ?? []);
+                setEquippedItems(data.equippedItems ?? []);
+                setPlacedItems(data.placedItems ?? []); // ตำแหน่งของต่างๆ
+                setCurrentRoom(data.currentRoom ?? '/CatItems/Rooms/Room1.png');
+                setCurrentSkin(data.currentSkin ?? 'default');
+            } else {
+                // 404 Not Found = User ใหม่ -> สุ่ม Skin
+                throw new Error("Save not found");
+            }
+        } catch (e) {
+            console.log(`[Game] Creating NEW save for ${userId} (Server-side).`);
+            const skins: CatSkin[] = ['black', 'orange', 'grey', 'white', 'calico', 'default'];
+            const randomSkin = skins[Math.floor(Math.random() * skins.length)];
+            
+            setCurrentSkin(randomSkin);
+            setCatPoints(1500);
+            setInventory([]);
+            setEquippedItems([]);
+            setPlacedItems([]);
+            setCatStats({ hunger: 50, happiness: 50, hygiene: 50 });
+            setCurrentRoom('/CatItems/Rooms/Room1.png');
+        } finally {
+            // โหลดเสร็จแล้ว ปลดล็อกให้เซฟได้
+            setLoadedUserId(userId);
+        }
+    };
+
+    loadGameData();
+  }, [userId]); 
+
+  // === SYSTEM: AUTO SAVE (บันทึกไป Server) ===
   useEffect(() => {
-    const key = `catGameData_${userId}`;
-    localStorage.setItem(key, JSON.stringify({ catPoints, catStats, inventory, equippedItems, placedItems, currentRoom, currentSkin }));
-  }, [catPoints, catStats, inventory, equippedItems, placedItems, currentRoom, currentSkin, userId]);
+    // ถ้ายังโหลดข้อมูลไม่เสร็จ (loadedUserId ไม่ตรงกับ userId ปัจจุบัน) ห้ามเซฟเด็ดขาด!
+    if (loadedUserId !== userId) return;
+
+    const saveGameData = async () => {
+        const dataToSave = { 
+            catPoints, catStats, inventory, equippedItems, placedItems, currentRoom, currentSkin 
+        };
+        try {
+            await fetch(`${API_BASE}/api/game/save`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId, data: dataToSave })
+            });
+            // console.log("Auto-saved to server");
+        } catch (e) {
+            console.error("Auto-save failed:", e);
+        }
+    };
+
+    // Debounce: รอให้ค่าหยุดนิ่ง 1 วินาทีค่อยเซฟ (ลดภาระ Server)
+    const timeoutId = setTimeout(saveGameData, 1000);
+    return () => clearTimeout(timeoutId);
+
+  }, [catPoints, catStats, inventory, equippedItems, placedItems, currentRoom, currentSkin, userId, loadedUserId]);
 
   const spawnParticle = (x: number, y: number, type: 'heart'|'sparkle'|'dust'|'note') => setParticles(p => [...p, { id: Date.now()+Math.random(), x, y, type, life: 100 }]);
   const playSound = (type: string) => { };
@@ -217,7 +252,15 @@ export const CatGameProvider: React.FC<{ children: ReactNode; userId?: string }>
   const updateStats = (e: any) => setCatStats(p => ({ hunger: Math.min(100,Math.max(0,p.hunger+(e.hunger||0))), happiness: Math.min(100,Math.max(0,p.happiness+(e.happiness||0))), hygiene: Math.min(100,Math.max(0,p.hygiene+(e.hygiene||0))) }));
   const toggleEquip = (id: string) => setEquippedItems(p => p.includes(id) ? p.filter(i => i !== id) : [...p, id]);
   const scrubCat = () => { setCatStats(p => ({...p, hygiene: Math.min(100, p.hygiene+0.5)})); if(Math.random()<0.2) spawnParticle(catPosition.x+64, catPosition.y, 'heart'); };
-  const resetGame = () => { const key = `catGameData_${userId}`; localStorage.removeItem(key); window.location.reload(); };
+  const resetGame = () => { 
+      // Reset บน Server ด้วย (optional)
+      const emptyData = { catPoints: 1500, inventory: [], currentSkin: 'default' }; // Reset คร่าวๆ
+      fetch(`${API_BASE}/api/game/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, data: emptyData })
+      }).then(() => window.location.reload());
+  };
 
   return (
     <CatGameContext.Provider value={{ catPosition, catAction, direction, isDragging, moveCat, setCatAction, setCatPosition: setCatPositionState, setIsDragging, catStats, catPoints, spawnedItem, activeToy, placedItems, currentRoom, addPoints, buyItem, activateToy, clearSpawnedItem, clearActiveToy, setActiveToy, moveFurniture, updateStats, inventory, equippedItems, toggleEquip, interactionMode, setInteractionMode, scrubCat, resetGame, isDarkMode, currentSkin, particles, spawnParticle, playSound }}>
