@@ -1,8 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { AudioItem } from "../types";
 import { audioService } from "../api/audioService";
-import { db } from '../db/offlineDb';
-import { useLiveQuery } from "dexie-react-hooks";
 
 // 1. Define Shape of Context
 interface AnnotationContextType {
@@ -44,10 +42,6 @@ interface AnnotationContextType {
   playAudio: (item: AudioItem) => void;
   playingFile: string | null;
   getFileName: (base: string) => string;
-  downloadProgress: { current: number; total: number; isComplete: boolean };
-  isOnline: boolean;
-  getOfflineAudioUrl: (filename: string) => Promise<string>;
-  
 }
 
 const AnnotationContext = createContext<AnnotationContextType | undefined>(undefined);
@@ -72,9 +66,6 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [playingFile, setPlayingFile] = useState<string | null>(null);
   const [lastChangeMtime, setLastChangeMtime] = useState<number>(0);
   const [trashData, setTrashData] = useState<AudioItem[]>([]);
-
-  const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0, isComplete: false });
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   // --- Helper Methods ---
   const setLoading = (loading: boolean, msg = "") => {
@@ -121,8 +112,6 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     localStorage.setItem("changes", JSON.stringify(changes));
   }, [employeeId, hasStarted, audioPath, audioFiles, correctData, incorrectData, changes]);
 
-  
-
   // Initial Load & Sync
   useEffect(() => {
     if (!employeeId) return;
@@ -153,80 +142,6 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return () => clearInterval(interval);
   }, [employeeId, lastChangeMtime]); // Added lastChangeMtime dependency to keep logic consistent with original
 
-
-  useEffect(() => {
-  const handleOnline = () => { setIsOnline(true); syncOfflineLogs(); };
-  const handleOffline = () => setIsOnline(false);
-  window.addEventListener('online', handleOnline);
-  window.addEventListener('offline', handleOffline);
-  return () => {
-    window.removeEventListener('online', handleOnline);
-    window.removeEventListener('offline', handleOffline);
-  };
-}, []);
-
-// --- 2. ระบบ Pre-load All Files (พระเอกของเรา) ---
-useEffect(() => {
-  const cacheAllAudio = async () => {
-    if (audioFiles.length === 0) return;
-
-    // กรองเอาเฉพาะไฟล์ที่ยังไม่ได้ทำ (correct/incorrect)
-    const filesToCache = audioFiles.filter(f => 
-      !correctData.some(c => c.filename === f.filename) && 
-      !incorrectData.some(i => i.filename === f.filename)
-    );
-
-    setDownloadProgress({ current: 0, total: filesToCache.length, isComplete: false });
-
-    // เช็คว่าไฟล์ไหนมีใน DB แล้ว จะได้ข้าม
-    const existingKeys = await db.audioCache.toCollection().primaryKeys();
-    const existingSet = new Set(existingKeys);
-    
-    const neededFiles = filesToCache.filter(f => !existingSet.has(f.filename));
-    
-    // update progress เริ่มต้น (นับไฟล์ที่มีอยู่แล้วเป็นเสร็จไปเลย)
-    let completedCount = filesToCache.length - neededFiles.length;
-    setDownloadProgress(prev => ({ ...prev, current: completedCount }));
-
-    // โหลดทีละ 5 ไฟล์พร้อมกัน (Concurrency Limit) เพื่อไม่ให้ Browser ค้าง
-    const batchSize = 5;
-        for (let i = 0; i < neededFiles.length; i += batchSize) {
-            const batch = neededFiles.slice(i, i + batchSize);
-            await Promise.all(batch.map(async (file) => {
-                try {
-                    // --- แก้ตรงนี้: สร้าง Full Path ---
-                    // เช็คว่าต้องใช้ / หรือ \ ในการคั่น
-                    const separator = audioPath.includes('\\') ? '\\' : '/'; 
-                    // ถ้า audioPath มี slash ปิดท้ายอยู่แล้วก็ไม่ต้องเติม
-                    const prefix = audioPath.endsWith(separator) ? audioPath : audioPath + separator;
-                    const fullPath = prefix + file.filename;
-
-                    // ส่ง fullPath ไปขอไฟล์ แต่ตอนเก็บใน DB ใช้แค่ชื่อไฟล์ (file.filename) ก็พอ
-                    const blob = await audioService.fetchAudioBlob(fullPath); 
-                    
-                    if (blob) {
-                        await db.audioCache.put({
-                            filename: file.filename, // key ใน DB ยังคงเป็นชื่อสั้นๆ เพื่อให้หาง่าย
-                            blob: blob,
-                            createdAt: Date.now()
-                        });
-                    }
-                } catch (e) { 
-                    console.error("Failed to cache", file.filename, e); 
-                }
-            }));
-      
-      completedCount += batch.length;
-      setDownloadProgress(prev => ({ ...prev, current: Math.min(completedCount, filesToCache.length) }));
-    }
-    
-    setDownloadProgress(prev => ({ ...prev, isComplete: true }));
-    console.log("All audio cached!");
-  };
-
-  cacheAllAudio();
-}, [audioFiles]); // run เมื่อโหลด list มาแล้ว
-
   // --- Core Business Logic ---
 
   // 1. Inspect / Tokenize
@@ -241,53 +156,53 @@ useEffect(() => {
     }
   };
 
-  // // 2. Decision Logic (Correct/Fail)
-  // const handleDecision = async (item: AudioItem, status: "correct" | "incorrect", smartEdits?: Record<number, string>) => {
-  //   let finalItem = { ...item };
+  // 2. Decision Logic (Correct/Fail)
+  const handleDecision = async (item: AudioItem, status: "correct" | "incorrect", smartEdits?: Record<number, string>) => {
+    let finalItem = { ...item };
 
-  //   // Merge Smart Edits if any
-  //   if (smartEdits && Object.keys(smartEdits).length > 0) {
-  //       let tokens = tokenCache.get(item.text);
-  //       if (!tokens) tokens = await inspectText(item.text);
+    // Merge Smart Edits if any
+    if (smartEdits && Object.keys(smartEdits).length > 0) {
+        let tokens = tokenCache.get(item.text);
+        if (!tokens) tokens = await inspectText(item.text);
         
-  //       if (tokens.length > 0) {
-  //           const newText = tokens.map((t, i) => smartEdits[i] || t).join("");
-  //           finalItem.text = newText;
-  //            // Clear cache for this text as it changed
-  //           setTokenCache(prev => {
-  //               const next = new Map(prev);
-  //               next.delete(item.text);
-  //               return next;
-  //           });
-  //       }
-  //   }
+        if (tokens.length > 0) {
+            const newText = tokens.map((t, i) => smartEdits[i] || t).join("");
+            finalItem.text = newText;
+             // Clear cache for this text as it changed
+            setTokenCache(prev => {
+                const next = new Map(prev);
+                next.delete(item.text);
+                return next;
+            });
+        }
+    }
 
-  //   // Update State
-  //   if (status === "correct") {
-  //     setCorrectData(prev => [finalItem, ...prev]);
-  //     setIncorrectData(prev => prev.filter(i => i.filename !== finalItem.filename));
+    // Update State
+    if (status === "correct") {
+      setCorrectData(prev => [finalItem, ...prev]);
+      setIncorrectData(prev => prev.filter(i => i.filename !== finalItem.filename));
       
-  //     // API Calls
-  //     await audioService.appendTsv("Correct.tsv", finalItem);
-  //     await audioService.deleteTsvEntry("fail.tsv", finalItem.filename);
+      // API Calls
+      await audioService.appendTsv("Correct.tsv", finalItem);
+      await audioService.deleteTsvEntry("fail.tsv", finalItem.filename);
       
-  //     // Log User Action
-  //     const logName = getFileName("Correct.tsv");
-  //     await audioService.appendTsv(logName, finalItem);
+      // Log User Action
+      const logName = getFileName("Correct.tsv");
+      await audioService.appendTsv(logName, finalItem);
 
-  //   } else {
-  //     setIncorrectData(prev => [finalItem, ...prev]);
-  //     setCorrectData(prev => prev.filter(i => i.filename !== finalItem.filename));
+    } else {
+      setIncorrectData(prev => [finalItem, ...prev]);
+      setCorrectData(prev => prev.filter(i => i.filename !== finalItem.filename));
 
-  //     // API Calls
-  //     await audioService.appendTsv("fail.tsv", finalItem);
-  //     await audioService.deleteTsvEntry("Correct.tsv", finalItem.filename);
+      // API Calls
+      await audioService.appendTsv("fail.tsv", finalItem);
+      await audioService.deleteTsvEntry("Correct.tsv", finalItem.filename);
       
-  //     // Delete User Log if exists
-  //     const logName = getFileName("Correct.tsv");
-  //     await audioService.deleteTsvEntry(logName, finalItem.filename); // Assuming using delete-tsv-entry logic
-  //   }
-  // };
+      // Delete User Log if exists
+      const logName = getFileName("Correct.tsv");
+      await audioService.deleteTsvEntry(logName, finalItem.filename); // Assuming using delete-tsv-entry logic
+    }
+  };
 
   // 3. Correction Logic (Edit Page)
   const handleCorrection = async (item: AudioItem, newText: string) => {
@@ -350,87 +265,6 @@ useEffect(() => {
     return map;
   }, [changes]);
 
-  // --- 3. แก้ไขฟังก์ชันเล่นเสียง (PlayAudio) ---
-// เราไม่ต้องแก้ function playAudio โดยตรง แต่ต้องแก้ตอนส่ง url ไปให้ Player
-// สร้าง Helper function ใหม่ใน Context
-const getOfflineAudioUrl = async (filename: string): Promise<string> => {
-    // 1. ลองดึงจาก DB ในเครื่องก่อน (ใช้ชื่อสั้นๆ หาได้เลย)
-    const cached = await db.audioCache.get(filename);
-    if (cached) {
-        return URL.createObjectURL(cached.blob);
-    }
-    
-    // 2. ถ้าไม่มีในเครื่อง ให้ดึงจาก Server (ต้องใช้ Full Path!)
-    const separator = audioPath.includes('\\') ? '\\' : '/';
-    const prefix = audioPath.endsWith(separator) ? audioPath : audioPath + separator;
-    const fullPath = prefix + filename;
-    
-    return audioService.getAudioUrl(fullPath);
-}
-
-// --- 4. แก้ไข handleDecision (Save Offline) ---
-const handleDecision = async (item: AudioItem, status: "correct" | "incorrect", smartEdits?: any) => {
-    // ... (Logic ตัดสินใจ Smart Edit เหมือนเดิม) ...
-
-    const actionType = status === "correct" ? 'CORRECT' : 'FAIL';
-    
-    // A. บันทึกลง Local DB ทันที
-    await db.logs.add({
-        action: actionType,
-        filename: item.filename,
-        data: item, // ข้อมูลที่ Process แล้ว
-        timestamp: Date.now(),
-        synced: false
-    });
-
-    // B. อัปเดต UI (Optimistic Update)
-    if (status === "correct") {
-        setCorrectData(prev => [item, ...prev]);
-        setIncorrectData(prev => prev.filter(i => i.filename !== item.filename));
-    } else {
-        setIncorrectData(prev => [item, ...prev]);
-        setCorrectData(prev => prev.filter(i => i.filename !== item.filename));
-    }
-
-    // C. พยายาม Sync ถ้ามีเน็ต
-    if (isOnline) {
-         syncOfflineLogs(); 
-    }
-    
-    // D. ลบไฟล์เสียงออกจาก Cache เพื่อคืนพื้นที่ (เพราะทำเสร็จแล้ว)
-    await db.audioCache.delete(item.filename);
-};
-
-// --- 5. ฟังก์ชัน Sync ข้อมูลกลับ Server ---
-const syncOfflineLogs = async () => {
-    const pendingLogs = await db.logs.where('synced').equals(0).toArray(); // 0 = false
-    if (pendingLogs.length === 0) return;
-
-    // แสดง Loading เล็กๆ มุมจอ หรือ Background process
-    console.log("Syncing...", pendingLogs.length);
-
-    for (const log of pendingLogs) {
-        try {
-            if (log.action === 'CORRECT') {
-                await audioService.appendTsv('Correct.tsv', log.data);
-                // บันทึก user-specific log
-                await audioService.appendTsv(`user-correct.tsv`, log.data);
-            } else if (log.action === 'FAIL') {
-                await audioService.appendTsv('fail.tsv', log.data);
-                await audioService.appendTsv(`user-fail.tsv`, log.data);
-            }
-            
-            // Mark as synced
-            await db.logs.update(log.id!, { synced: true });
-            // หรือลบทิ้งเลยก็ได้: await db.logs.delete(log.id!);
-            
-        } catch (e) {
-            console.error("Sync failed, will retry later", e);
-        }
-    }
-};
-  
-
   // --- Refresh/Unload Handler (Silent - No Browser Dialog) ---
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -455,10 +289,7 @@ const syncOfflineLogs = async () => {
       tokenCache, suggestions,  // ADD suggestions HERE
       inspectText,
       handleDecision, handleCorrection,
-      playAudio, playingFile, getFileName,
-      downloadProgress, // <--- เพิ่ม
-      isOnline,
-      getOfflineAudioUrl,
+      playAudio, playingFile, getFileName
     }}>
       {children}
     </AnnotationContext.Provider>

@@ -1,158 +1,103 @@
-// src/components/CatAvatar.tsx
-import React, { useEffect, useRef, useState } from 'react';
-import { useCatGame } from '../context/CatGameContext';
+import React, { useEffect, useState } from "react";
 
-// === Config: ตั้งค่าจำนวนเฟรมของแต่ละไฟล์ให้ถูกต้องตรงนี้ ===
-const SPRITES: Record<string, { src: string; frames: number; speed: number }> = {
-  // แก้ IDLE เป็น 6 เฟรม ตามที่คุณแจ้ง
-  IDLE: { src: '/Pochi/Sprites/Idle.png', frames: 6, speed: 0.8 }, 
-  SITTING: { src: '/Pochi/Sprites/Idle.png', frames: 6, speed: 0.8 },
-  
-  // ลองเช็คไฟล์ Running.png ดูนะครับ ปกติ Pochi อาจจะมี 4 หรือ 8 เฟรม
-  // ถ้าวิ่งแล้วกระตุก ให้ลองแก้เป็น 8 ดูครับ
-  WALKING: { src: '/Pochi/Sprites/Running.png', frames: 6, speed: 0.6 },
-  
-  // ท่าอื่นๆ ปกติมักจะ 4 เฟรม
-  DRAGGED: { src: '/Pochi/Sprites/Tickle.png', frames: 4, speed: 0.4 },
-  FALLING: { src: '/Pochi/Sprites/Surprised.png', frames: 4, speed: 0.4 },
-  EATING: { src: '/Pochi/Sprites/Happy.png', frames: 10, speed: 0.8 },
-  FULL: { src: '/Pochi/Sprites/Dead.png', frames: 10, speed: 0.8 },
-  SLEEPING: { src: '/Pochi/Sprites/Sleeping.png', frames: 4, speed: 1.0 },
-  CHILLING: { src: '/Pochi/Sprites/Chilling.png', frames: 8, speed: 1.0 },
-};
+interface CatAvatarProps {
+  mood: "happy" | "sad" | "neutral" | "sleeping" | "excited";
+  costume?: string;
+  isWalking: boolean;
+  onClick?: () => void;
+}
 
-// ขนาดตัวแมว (pixel)
-const CAT_SIZE = 128; 
-
-export const CatAvatar: React.FC = () => {
-  const { 
-    catPosition, catAction, setCatPosition, setCatAction, setIsDragging, isDragging, 
-    equippedItems, interactionMode, scrubCat, direction 
-  } = useCatGame();
-  
-  const dragOffset = useRef({ x: 0, y: 0 });
-  const [bubbles, setBubbles] = useState<{x:number, y:number, id: number}[]>([]);
-
-  // --- Logic เดิม ---
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (interactionMode === 'BRUSH') return;
-    e.preventDefault();
-    setIsDragging(true);
-    setCatAction('DRAGGED');
-    dragOffset.current = { x: e.clientX - catPosition.x, y: e.clientY - catPosition.y };
-  };
-
-  const handleMouseMoveOnCat = (e: React.MouseEvent) => {
-     if (interactionMode === 'BRUSH' && e.buttons === 1) {
-         scrubCat();
-         const id = Date.now();
-         setBubbles(prev => [...prev, { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY, id }]);
-         setTimeout(() => setBubbles(prev => prev.filter(b => b.id !== id)), 800);
-     }
-  };
+export const CatAvatar: React.FC<CatAvatarProps> = ({ mood, costume, isWalking, onClick }) => {
+  const [blink, setBlink] = useState(false);
 
   useEffect(() => {
-      const handleMouseMove = (e: MouseEvent) => {
-        if (!isDragging) return;
-        setCatPosition({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y });
-      };
-      const handleMouseUp = () => {
-          if (!isDragging) return;
-          setIsDragging(false);
-          const floorLevel = window.innerHeight - 150;
-          if (catPosition.y < floorLevel) {
-              setCatAction('FALLING');
-              const fallInterval = setInterval(() => {
-                  setCatPosition(prev => {
-                      const nextY = prev.y + 15;
-                      if (nextY >= floorLevel) { clearInterval(fallInterval); setCatAction('SITTING'); return { x: prev.x, y: floorLevel }; }
-                      return { x: prev.x, y: nextY };
-                  });
-              }, 16);
-          } else { setCatAction('SITTING'); }
-      };
-      if (isDragging) { window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp); }
-      return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
-  }, [isDragging, setCatPosition, setIsDragging, setCatAction, catPosition.y]);
+    const timer = setInterval(() => {
+      setBlink(true);
+      setTimeout(() => setBlink(false), 200);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, []);
 
-  // --- Animation Setup ---
-  const currentSprite = SPRITES[catAction] || SPRITES['IDLE'];
-  const isFlipped = direction === 'left';
-  const shouldFlip = isFlipped && (catAction !== 'DRAGGED' && catAction !== 'FALLING');
-  
-  // *** คำนวณความกว้างตามจำนวนเฟรมของท่านั้นๆ ***
-  // เช่น Idle 6 เฟรม = 128 * 6 = 768px
-  // Running 4 เฟรม = 128 * 4 = 512px
-  const bgWidth = currentSprite.frames * CAT_SIZE; 
-  const endPosition = -bgWidth; 
-
-  const renderAccessories = () => (
-      <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
-        {equippedItems.includes('sunglasses') && (
-            <img 
-                src="https://cdn-icons-png.flaticon.com/512/186/186315.png" 
-                alt="glasses"
-                style={{
-                    position: 'absolute', top: '35%', left: '35%', width: '40%', 
-                    filter: 'brightness(0)', transform: shouldFlip ? 'scaleX(-1)' : 'none'
-                }} 
-            />
-        )}
-        {equippedItems.includes('tophat') && (
-            <div style={{
-                position: 'absolute', top: '-10%', left: '25%', width: '50%', height: '40%',
-                backgroundImage: 'linear-gradient(to bottom, #333 80%, #C0392B 80%)',
-                clipPath: 'polygon(20% 0%, 80% 0%, 80% 100%, 100% 100%, 100% 100%, 0% 100%, 0% 100%, 20% 100%)',
-                transform: shouldFlip ? 'scaleX(-1)' : 'none'
-            }}>
-                <div style={{width:'60%', height:'100%', background:'#333', margin:'0 auto'}} />
-            </div>
-        )}
-      </div>
-  );
+  const catColor = "#fb923c";
+  const bellyColor = "#ffedd5";
 
   return (
+    // 🟢 แก้ไข: ใช้ style กำหนดขนาดตายตัว (60px) ป้องกันการขยายเต็มจอ
     <div 
-        style={{
-            position: 'fixed',
-            left: `${catPosition.x}px`, 
-            top: `${catPosition.y}px`,
-            width: `${CAT_SIZE}px`, 
-            height: `${CAT_SIZE}px`,
-            transition: isDragging ? 'none' : (catAction === 'FALLING' ? 'top 0.1s linear' : 'top 3s linear, left 3s linear'),
-            zIndex: 9999,
-            cursor: interactionMode === 'BRUSH' ? 'url(https://img.icons8.com/emoji/32/000000/soap-emoji.png), auto' : (isDragging ? 'grabbing' : 'grab'),
-            transform: `${catAction === 'DRAGGED' ? 'scale(1.1) rotate(5deg)' : 'scale(1)'} ${shouldFlip ? 'scaleX(-1)' : ''}`,
-            imageRendering: 'pixelated', 
-            
-            // Background Logic
-            backgroundImage: `url(${currentSprite.src})`,
-            backgroundRepeat: 'no-repeat',
-            // ตรงนี้จะขยายตามจำนวนเฟรมที่ตั้งไว้ใน SPRITES อัตโนมัติ
-            backgroundSize: `${bgWidth}px ${CAT_SIZE}px`, 
-            
-            // Steps จะแบ่งตามจำนวนเฟรมที่ตั้งไว้
-            animation: `playSprite-${catAction} ${currentSprite.speed}s steps(${currentSprite.frames}) infinite`
-        }}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMoveOnCat}
+      onClick={onClick}
+      style={{ width: '60px', height: '60px' }} // <-- บังคับขนาดตรงนี้เลย
+      className={`
+        relative cursor-pointer transition-transform duration-200 
+        hover:scale-110 active:scale-95 
+        ${isWalking ? "animate-bounce-walk" : ""}
+      `}
+      title="Pet me!"
     >
-        {renderAccessories()}
-        {bubbles.map(b => (
-            <div key={b.id} style={{ position: 'absolute', left: b.x, top: b.y, fontSize: '20px', pointerEvents: 'none', animation: 'fadeUp 0.8s forwards' }}>🧼</div>
-        ))}
+      <svg viewBox="0 0 200 200" className="w-full h-full drop-shadow-md">
+        {/* หาง */}
+        <g className="origin-bottom-left animate-tail-wag">
+          <path d="M140 150 Q 180 120 160 80 Q 150 60 170 70" fill="none" stroke={catColor} strokeWidth="15" strokeLinecap="round" />
+        </g>
+
+        {/* ตัว */}
+        <ellipse cx="100" cy="140" rx="60" ry="45" fill={catColor} />
+        <ellipse cx="100" cy="145" rx="35" ry="25" fill={bellyColor} />
+
+        {/* เท้า */}
+        <circle cx="70" cy="180" r="12" fill={catColor} />
+        <circle cx="130" cy="180" r="12" fill={catColor} />
         
-        {/* Dynamic Keyframes */}
-        <style>{`
-            @keyframes playSprite-${catAction} {
-                from { background-position: 0px 0px; }
-                to { background-position: ${endPosition}px 0px; }
-            }
-            @keyframes fadeUp { 
-                0% { opacity: 1; transform: translateY(0); } 
-                100% { opacity: 0; transform: translateY(-30px); } 
-            }
-        `}</style>
+        {/* หัว */}
+        <g className="origin-center">
+            <path d="M60 70 L 40 30 L 90 50 Z" fill={catColor} />
+            <path d="M140 70 L 160 30 L 110 50 Z" fill={catColor} />
+            <circle cx="100" cy="90" r="55" fill={catColor} />
+            
+            {/* หน้าตา */}
+            {mood === "sleeping" ? (
+                <>
+                    <path d="M75 90 Q 85 95 95 90" fill="none" stroke="#333" strokeWidth="4" />
+                    <path d="M105 90 Q 115 95 125 90" fill="none" stroke="#333" strokeWidth="4" />
+                </>
+            ) : mood === "excited" ? (
+                <>
+                     <path d="M75 85 L 85 95 L 75 105" fill="none" stroke="#333" strokeWidth="4" />
+                     <path d="M125 85 L 115 95 L 125 105" fill="none" stroke="#333" strokeWidth="4" />
+                </>
+            ) : blink ? (
+                <>
+                    <line x1="75" y1="90" x2="95" y2="90" stroke="#333" strokeWidth="4" />
+                    <line x1="105" y1="90" x2="125" y2="90" stroke="#333" strokeWidth="4" />
+                </>
+            ) : mood === "sad" ? (
+                 <>
+                    <circle cx="85" cy="90" r="6" fill="#333" />
+                    <circle cx="115" cy="90" r="6" fill="#333" />
+                    <path d="M75 80 L 95 75" stroke="#333" strokeWidth="3" />
+                    <path d="M125 80 L 105 75" stroke="#333" strokeWidth="3" />
+                </>
+            ) : (
+                <>
+                    <circle cx="85" cy="90" r={6} fill="#333" />
+                    <circle cx="115" cy="90" r={6} fill="#333" />
+                    <circle cx="87" cy="88" r="2" fill="white" />
+                    <circle cx="117" cy="88" r="2" fill="white" />
+                </>
+            )}
+
+            <path d="M95 105 L 105 105 L 100 110 Z" fill="pink" />
+            <path d="M100 110 Q 90 120 80 110" fill="none" stroke="#333" strokeWidth="3" />
+            <path d="M100 110 Q 110 120 120 110" fill="none" stroke="#333" strokeWidth="3" />
+            
+            <circle cx="70" cy="105" r="10" fill="#fca5a5" opacity="0.6" />
+            <circle cx="130" cy="105" r="10" fill="#fca5a5" opacity="0.6" />
+        </g>
+      </svg>
+      
+      {/* Costume */}
+      <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -mt-3 text-2xl drop-shadow-md pointer-events-none select-none">
+        {costume}
+      </div>
     </div>
   );
 };

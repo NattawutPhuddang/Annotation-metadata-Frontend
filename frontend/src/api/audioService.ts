@@ -22,18 +22,6 @@ export const audioService = {
     }
   },
 
-  async fetchAudioBlob(filename: string): Promise<Blob | null> {
-  try {
-    const url = this.getAudioUrl(filename);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Network response was not ok');
-    return await res.blob();
-  } catch (err) {
-    console.error(`Failed to fetch blob for ${filename}`, err);
-    return null;
-  }
-},
-
   async loadChanges(): Promise<Array<{ original: string; changed: string }>> {
     try {
       const res = await fetch(`${API_BASE}/api/load-file?filename=ListOfChange.tsv`);

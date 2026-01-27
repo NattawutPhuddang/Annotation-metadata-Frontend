@@ -5,9 +5,6 @@ import LoginPage from "./pages/Login/LoginPage";
 import MainLayout from "./components/Layout/MainLayout";
 import { Modal } from "./components/Shared/Modal";
 import { RotateCw } from "lucide-react";
-import { CatGameProvider } from './context/CatGameContext';
-import { CatSystem } from './components/CatSystem';
-import { CatHUD } from './components/CatHUD';
 import "./App.css";
 
 const App: React.FC = () => {
@@ -84,10 +81,7 @@ const App: React.FC = () => {
 
   return (
     <>
-    <CatGameProvider>
       {/* Reload Warning Modal */}
-      <CatHUD />
-      <CatSystem />
       <Modal
         isOpen={showReloadModal}
         type="warning"
@@ -109,7 +103,6 @@ const App: React.FC = () => {
       ) : (
         <MainLayout />
       )}
-      </CatGameProvider>
     </>
   );
 };

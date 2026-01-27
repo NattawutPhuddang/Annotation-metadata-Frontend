@@ -18,9 +18,9 @@ const MainLayout: React.FC = () => {
     employeeId, logout, isDarkMode, toggleTheme, 
     pendingItems, correctData, incorrectData,
     isLoading, hasStarted, setHasStarted, // ADD setHasStarted
-    setAudioFiles, setAudioPath,
-    downloadProgress, isOnline // ADD these to reset
+    setAudioFiles, setAudioPath // ADD these to reset
   } = useAnnotation();
+
   const [currentTab, setCurrentTab] = useState<Tab>("pending");
 
   // 1. ถ้ายังไม่ได้เริ่มงาน (ยังไม่ Scan ไฟล์) ให้แสดงหน้า Upload
@@ -36,7 +36,6 @@ const MainLayout: React.FC = () => {
       setAudioPath("");
     }
   };
-  
 
   // 2. ถ้าเริ่มแล้ว แสดง Layout หลัก
   return (
@@ -125,26 +124,7 @@ const MainLayout: React.FC = () => {
         {currentTab === "fail" && <EditPage />}
         {currentTab === "dashboard" && <DashboardPage />}
       </main>
-    {/* Status Bar ด้านล่าง */}
-    <div className="fixed bottom-0 left-0 right-0 h-8 bg-slate-900 text-white text-xs flex items-center px-4 justify-between z-50">
-       <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`} />
-          <span>{isOnline ? 'Online' : 'Offline Mode'}</span>
-       </div>
-       
-       {!downloadProgress.isComplete && (
-         <div className="flex items-center gap-2">
-            <span>Caching Audio... {downloadProgress.current} / {downloadProgress.total}</span>
-            <div className="w-20 h-2 bg-slate-700 rounded-full overflow-hidden">
-               <div 
-                 className="h-full bg-blue-500 transition-all duration-300"
-                 style={{ width: `${(downloadProgress.current / downloadProgress.total) * 100}%` }}
-               />
-            </div>
-         </div>
-       )}
     </div>
-  </div>
   );
 };
 

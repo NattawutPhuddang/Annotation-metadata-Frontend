@@ -34,8 +34,7 @@ const AnnotationPage: React.FC = () => {
     inspectText,
     tokenCache,
     suggestions, 
-    setAudioFiles,
-    getOfflineAudioUrl // ADD THIS
+    setAudioFiles, // ADD THIS
   } = useAnnotation();
 
   const [page, setPage] = useState(1);
@@ -68,26 +67,6 @@ const AnnotationPage: React.FC = () => {
     page * ITEMS_PER_PAGE,
   );
   const firstItem = items[0];
-  const currentItem = pendingItems[0];
-  const [currentAudioSrc, setCurrentAudioSrc] = useState<string>("");
-  useEffect(() => {
-    const loadAudio = async () => {
-      if (currentItem) {
-        // เซ็ตเป็นค่าว่างก่อน เพื่อกันเสียงเก่าค้าง หรือกัน Player เอ๋อ
-        setCurrentAudioSrc(""); 
-        
-        // เรียกใช้ฟังก์ชันพระเอกของเรา
-        const src = await getOfflineAudioUrl(currentItem.filename);
-        setCurrentAudioSrc(src);
-      }
-    };
-    loadAudio();
-    return () => {
-       if (currentAudioSrc.startsWith('blob:')) {
-           URL.revokeObjectURL(currentAudioSrc);
-       }
-    };
-  }, [currentItem, getOfflineAudioUrl]);
 
   // --- Persistence Effects ---
   useEffect(() => {
@@ -102,7 +81,6 @@ const AnnotationPage: React.FC = () => {
     setIsBatchMode(false);
   }, [page]);
 
-  
   // --- Automation Logic ---
   useEffect(() => {
     if (!firstItem) return;
@@ -122,8 +100,6 @@ const AnnotationPage: React.FC = () => {
       }
     }
   }, [firstItem, autoPlay, playingFile, playAudio]);
-
-
 
   // --- Handlers ---
 
@@ -364,7 +340,7 @@ const AnnotationPage: React.FC = () => {
                         {item.audioPath && (
                           <div className="w-full px-2">
                             <WaveformPlayer
-                              audioUrl={currentAudioSrc}
+                              audioUrl={item.audioPath}
                               isPlaying={isPlaying}
                               onPlayChange={(p) =>
                                 !p && isPlaying && playAudio(item)
