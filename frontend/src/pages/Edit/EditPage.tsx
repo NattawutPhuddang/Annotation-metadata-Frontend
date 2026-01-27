@@ -390,28 +390,31 @@ const EditPage: React.FC = () => {
   }, [playingFile, items, incorrectData, fileMap, playAudio]);
 
   useEffect(() => {
-  // สร้าง timer สำหรับ debounce เพื่อไม่ให้ยิง API ถี่เกินไป
   const timer = setTimeout(async () => {
-    // วนลูปเช็ครายการที่กำลังแก้ไข (edits)
     for (const filename in edits) {
-      const newText = edits[filename];
+      let newText = edits[filename];
       const item = incorrectData.find(i => i.filename === filename);
       
-      // ถ้ามีข้อความใหม่ และยังไม่มีการตัดคำไว้ใน Cache หรือคำไม่ตรงกัน
-      if (newText && item && !tokenCache.has(newText)) {
-        try {
-          // สั่งตัดคำใหม่ทันที (เรียกผ่าน inspectText หรือ audioService.tokenize)
-          await inspectText(newText); 
-        } catch (e) {
-          console.error("Auto tokenize failed", e);
+      if (newText && item) {
+        // ✅ เพิ่ม Logic ลบ (คำผิด,คำถูก) ให้เหลือแค่ คำถูก
+        // Regex: /\(([^,]+),([^)]+)\)/g 
+        // อธิบาย: หา ( ตามด้วยตัวอักษรอะไรก็ได้ที่ไม่ใช่ comma , ตามด้วย comma , ตามด้วยคำที่ต้องการ , และปิดด้วย )
+        const cleanedText = newText.replace(/\(([^,]+),([^)]+)\)/g, '$2');
+
+        // ถ้าล้างคำแล้วยังไม่มีใน cache ค่อยส่งไปตัดคำ
+        if (!tokenCache.has(cleanedText)) {
+          try {
+            await inspectText(cleanedText); 
+          } catch (e) {
+            console.error("Auto tokenize failed", e);
+          }
         }
       }
     }
-  }, 800); // รอ 0.8 วินาทีหลังพิมพ์หยุดถึงจะเริ่มตัดคำ
+  }, 800);
 
-  return () => clearTimeout(timer); // ล้าง timer เมื่อมีการพิมพ์ต่อ
+  return () => clearTimeout(timer);
 }, [edits, inspectText, tokenCache, incorrectData]);
-
   return (
     <div className="edit-container animate-fade-in">
       {/* --- Header & Toolbar --- */}
@@ -560,6 +563,9 @@ const EditPage: React.FC = () => {
                     const fileSmartEdits = smartEditsMap[item.filename] || {};
                     const isExpanded = shouldExpand(idx);
 
+                  // ✅ คำนวณ cleanedText สำหรับแสดงผล Chips
+                    const cleanedVal = val.replace(/\(([^,]+),([^)]+)\)/g, '$2');
+
                     let src = item.audioPath;
                     if (!src) src = fileMap.get(item.filename);
                     if (
@@ -656,9 +662,9 @@ const EditPage: React.FC = () => {
 
                             <div className="mt-3 pl-1 border-t border-slate-100 pt-2">
                               <TokenizedText
-                                text={val} // เปลี่ยนจาก item.text เป็น val เพื่อให้ตัดคำตามที่พิมพ์จริง
+                                text={cleanedVal} // เปลี่ยนจาก item.text เป็น val เพื่อให้ตัดคำตามที่พิมพ์จริง
                                 onInspect={inspectText}
-                                tokens={tokenCache.get(val) || tokens} // ดึง token จาก cache ตามข้อความล่าสุด
+                                tokens={tokenCache.get(cleanedVal) || tokens} // ดึง token จาก cache ตามข้อความล่าสุด
                                 isExpanded={isExpanded}
                                 suggestions={suggestions}
                                 appliedEdits={fileSmartEdits}
