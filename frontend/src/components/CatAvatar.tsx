@@ -1,103 +1,110 @@
-import React, { useEffect, useState } from "react";
+// src/components/CatAvatar.tsx
+import React, { useEffect, useRef, useState } from 'react';
+import { useCatGame, GAME_HEIGHT } from '../context/CatGameContext';
 
-interface CatAvatarProps {
-  mood: "happy" | "sad" | "neutral" | "sleeping" | "excited";
-  costume?: string;
-  isWalking: boolean;
-  onClick?: () => void;
-}
+const SPRITES: Record<string, { src: string; frames: number; speed: number }> = {
+  IDLE: { src: '/Pochi/Sprites/Idle.png', frames: 6, speed: 0.8 }, 
+  SITTING: { src: '/Pochi/Sprites/Idle.png', frames: 6, speed: 0.8 },
+  WALKING: { src: '/Pochi/Sprites/Running.png', frames: 6, speed: 0.6 },
+  CHASING: { src: '/Pochi/Sprites/Running.png', frames: 6, speed: 0.3 }, 
+  DRAGGED: { src: '/Pochi/Sprites/Surprised.png', frames: 4, speed: 0.4 },
+  FALLING: { src: '/Pochi/Sprites/Surprised.png', frames: 4, speed: 0.4 },
+  EATING: { src: '/Pochi/Sprites/Happy.png', frames: 4, speed: 0.8 },
+  POKING: { src: '/Pochi/Sprites/Attack.png', frames: 7, speed: 0.2 }, 
+  PLAYING: { src: '/Pochi/Sprites/Attack.png', frames: 7, speed: 0.5 },
+  SLEEPING: { src: '/Pochi/Sprites/Sleeping.png', frames: 4, speed: 1.0 },
+};
+const CAT_SIZE = 128; 
 
-export const CatAvatar: React.FC<CatAvatarProps> = ({ mood, costume, isWalking, onClick }) => {
-  const [blink, setBlink] = useState(false);
+export const CatAvatar: React.FC = () => {
+  const { catPosition, catAction, setCatPosition, setCatAction, setIsDragging, isDragging, equippedItems, interactionMode, scrubCat, direction, currentSkin, spawnParticle } = useCatGame();
+  const dragOffset = useRef({ x: 0, y: 0 });
+  const [bubbles, setBubbles] = useState<{x:number, y:number, id: number}[]>([]);
+
+  // Skin Filter
+  const getSkinFilter = () => {
+      switch (currentSkin) {
+          case 'black': return 'brightness(0.4) grayscale(100%)';
+          case 'grey': return 'grayscale(100%) brightness(0.9)';
+          case 'orange': return 'sepia(1) saturate(3) hue-rotate(-10deg)';
+          case 'white': return 'brightness(1.5) contrast(0.8)';
+          case 'calico': return 'sepia(0.5) contrast(1.2)';
+          default: return 'none';
+      }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (interactionMode === 'BRUSH') return;
+    e.preventDefault(); e.stopPropagation(); 
+    setIsDragging(true); setCatAction('DRAGGED');
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  const handleMouseMoveOnCat = (e: React.MouseEvent) => {
+     if (interactionMode === 'BRUSH' && e.buttons === 1) {
+         scrubCat(); const id = Date.now(); setBubbles(p => [...p, { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY, id }]);
+         setTimeout(() => setBubbles(p => p.filter(b => b.id !== id)), 800);
+     }
+  };
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setBlink(true);
-      setTimeout(() => setBlink(false), 200);
-    }, 4000);
-    return () => clearInterval(timer);
-  }, []);
+      const move = (e: MouseEvent) => { 
+          if(isDragging) {
+              const container = document.querySelector('.cat-game-container');
+              if (container) {
+                  const rect = container.getBoundingClientRect();
+                  setCatPosition({ x: e.clientX - rect.left - dragOffset.current.x, y: e.clientY - rect.top - dragOffset.current.y });
+              }
+          }
+      };
+      const up = () => {
+          if (isDragging) {
+              setIsDragging(false);
+              const floor = GAME_HEIGHT - 100; // พื้นห้อง
+              if (catPosition.y < floor) {
+                  setCatAction('FALLING');
+                  const fall = setInterval(() => {
+                      setCatPosition(p => { 
+                          const ny = p.y + 15; 
+                          if(ny >= floor){ clearInterval(fall); setCatAction('SITTING'); spawnParticle(p.x+64, floor, 'dust'); return{x:p.x, y:floor}; } 
+                          return{x:p.x, y:ny}; 
+                      });
+                  }, 16);
+              } else setCatAction('SITTING');
+          }
+      };
+      window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+      return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+  }, [isDragging, catPosition.y, spawnParticle]);
 
-  const catColor = "#fb923c";
-  const bellyColor = "#ffedd5";
+  const currentSprite = SPRITES[catAction] || SPRITES['IDLE'];
+  const shouldFlip = direction === 'left' && (catAction !== 'DRAGGED' && catAction !== 'FALLING');
+  const bgWidth = currentSprite.frames * CAT_SIZE; 
+  const endPos = -bgWidth; 
 
   return (
-    // 🟢 แก้ไข: ใช้ style กำหนดขนาดตายตัว (60px) ป้องกันการขยายเต็มจอ
-    <div 
-      onClick={onClick}
-      style={{ width: '60px', height: '60px' }} // <-- บังคับขนาดตรงนี้เลย
-      className={`
-        relative cursor-pointer transition-transform duration-200 
-        hover:scale-110 active:scale-95 
-        ${isWalking ? "animate-bounce-walk" : ""}
-      `}
-      title="Pet me!"
+    <div className="cat-avatar"
+        style={{
+            position: 'absolute', left: `${catPosition.x}px`, top: `${catPosition.y}px`, 
+            width: `${CAT_SIZE}px`, height: `${CAT_SIZE}px`,
+            transition: isDragging ? 'none' : (['FALLING','CHASING','POKING'].includes(catAction) ? 'all 0.1s linear' : 'top 3s linear, left 3s linear'),
+            zIndex: 20, 
+            cursor: interactionMode === 'BRUSH' ? 'url(https://img.icons8.com/emoji/32/000000/soap-emoji.png), auto' : (isDragging ? 'grabbing' : 'grab'),
+            transform: `${catAction === 'DRAGGED' ? 'scale(1.1) rotate(5deg)' : 'scale(1)'} ${shouldFlip ? 'scaleX(-1)' : ''}`,
+            imageRendering: 'pixelated', 
+            backgroundImage: `url(${currentSprite.src})`, backgroundRepeat: 'no-repeat', backgroundSize: `${bgWidth}px ${CAT_SIZE}px`, 
+            animation: `playSprite-${catAction} ${currentSprite.speed}s steps(${currentSprite.frames}) infinite`,
+            filter: getSkinFilter(), // Apply Skin
+        }} 
+        onMouseDown={handleMouseDown} onMouseMove={handleMouseMoveOnCat}
     >
-      <svg viewBox="0 0 200 200" className="w-full h-full drop-shadow-md">
-        {/* หาง */}
-        <g className="origin-bottom-left animate-tail-wag">
-          <path d="M140 150 Q 180 120 160 80 Q 150 60 170 70" fill="none" stroke={catColor} strokeWidth="15" strokeLinecap="round" />
-        </g>
-
-        {/* ตัว */}
-        <ellipse cx="100" cy="140" rx="60" ry="45" fill={catColor} />
-        <ellipse cx="100" cy="145" rx="35" ry="25" fill={bellyColor} />
-
-        {/* เท้า */}
-        <circle cx="70" cy="180" r="12" fill={catColor} />
-        <circle cx="130" cy="180" r="12" fill={catColor} />
-        
-        {/* หัว */}
-        <g className="origin-center">
-            <path d="M60 70 L 40 30 L 90 50 Z" fill={catColor} />
-            <path d="M140 70 L 160 30 L 110 50 Z" fill={catColor} />
-            <circle cx="100" cy="90" r="55" fill={catColor} />
-            
-            {/* หน้าตา */}
-            {mood === "sleeping" ? (
-                <>
-                    <path d="M75 90 Q 85 95 95 90" fill="none" stroke="#333" strokeWidth="4" />
-                    <path d="M105 90 Q 115 95 125 90" fill="none" stroke="#333" strokeWidth="4" />
-                </>
-            ) : mood === "excited" ? (
-                <>
-                     <path d="M75 85 L 85 95 L 75 105" fill="none" stroke="#333" strokeWidth="4" />
-                     <path d="M125 85 L 115 95 L 125 105" fill="none" stroke="#333" strokeWidth="4" />
-                </>
-            ) : blink ? (
-                <>
-                    <line x1="75" y1="90" x2="95" y2="90" stroke="#333" strokeWidth="4" />
-                    <line x1="105" y1="90" x2="125" y2="90" stroke="#333" strokeWidth="4" />
-                </>
-            ) : mood === "sad" ? (
-                 <>
-                    <circle cx="85" cy="90" r="6" fill="#333" />
-                    <circle cx="115" cy="90" r="6" fill="#333" />
-                    <path d="M75 80 L 95 75" stroke="#333" strokeWidth="3" />
-                    <path d="M125 80 L 105 75" stroke="#333" strokeWidth="3" />
-                </>
-            ) : (
-                <>
-                    <circle cx="85" cy="90" r={6} fill="#333" />
-                    <circle cx="115" cy="90" r={6} fill="#333" />
-                    <circle cx="87" cy="88" r="2" fill="white" />
-                    <circle cx="117" cy="88" r="2" fill="white" />
-                </>
-            )}
-
-            <path d="M95 105 L 105 105 L 100 110 Z" fill="pink" />
-            <path d="M100 110 Q 90 120 80 110" fill="none" stroke="#333" strokeWidth="3" />
-            <path d="M100 110 Q 110 120 120 110" fill="none" stroke="#333" strokeWidth="3" />
-            
-            <circle cx="70" cy="105" r="10" fill="#fca5a5" opacity="0.6" />
-            <circle cx="130" cy="105" r="10" fill="#fca5a5" opacity="0.6" />
-        </g>
-      </svg>
-      
-      {/* Costume */}
-      <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -mt-3 text-2xl drop-shadow-md pointer-events-none select-none">
-        {costume}
-      </div>
+        <div style={{position:'absolute',width:'100%',height:'100%',pointerEvents:'none', filter:'none'}}>
+            {equippedItems.includes('sunglasses') && <img src="https://cdn-icons-png.flaticon.com/512/186/186315.png" style={{position:'absolute',top:'35%',left:'35%',width:'40%',filter:'brightness(0)',transform:shouldFlip?'scaleX(-1)':'none'}}/>}
+            {equippedItems.includes('tophat') && <div style={{position:'absolute',top:'-10%',left:'25%',width:'50%',height:'40%',background:'linear-gradient(to bottom, #333 80%, #C0392B 80%)',clipPath:'polygon(20% 0%, 80% 0%, 80% 100%, 100% 100%, 100% 100%, 0% 100%, 0% 100%, 20% 100%)',transform:shouldFlip?'scaleX(-1)':'none'}}><div style={{width:'60%',height:'100%',background:'#333',margin:'0 auto'}}/></div>}
+        </div>
+        {bubbles.map(b => <div key={b.id} style={{position:'absolute',left:b.x,top:b.y,fontSize:'20px',pointerEvents:'none',animation:'fadeUp 0.8s forwards'}}>🧼</div>)}
+        <style>{`@keyframes playSprite-${catAction} { from { background-position: 0px 0px; } to { background-position: ${endPos}px 0px; } } @keyframes fadeUp { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-30px); } }`}</style>
     </div>
   );
 };
