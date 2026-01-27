@@ -326,7 +326,7 @@ const EditPage: React.FC = () => {
   };
 
   const handleDownloadPersonal = async () => {
-    const filename = `${employeeId}-Correct.tsv`;
+    const filename = `${employeeId}-fail.tsv`;
     try {
       const data = await audioService.loadTSV(filename);
       if (!data || data.length === 0) {
@@ -346,9 +346,9 @@ const EditPage: React.FC = () => {
     }
   };
 
-  const handleDelete = async (filename: string) => {
-    setFileToDelete(filename);
-  };
+  // const handleDelete = async (filename: string) => {
+  //   setFileToDelete(filename);
+  // };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -438,7 +438,14 @@ const EditPage: React.FC = () => {
           </div>
 
           <div className="header-actions">
-            <button onClick={handleDownloadPersonal} className="btn-download">
+            <button 
+              onClick={() => {
+              setShowLocalOnly(true);
+              setPage(1);
+              handleDownload(filteredItems, `${employeeId}-Filtered.tsv`);
+            }}
+              className="btn-download"
+            >
               <FileText size={16} /> Export My Log
             </button>
             <button
