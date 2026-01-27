@@ -4,6 +4,7 @@ import { useAnnotation } from '../../context/AnnotationContext';
 import { audioService } from '../../api/audioService';
 import { AudioItem } from '../../types';
 import { Modal } from '../../components/Shared/Modal';
+import { db, CachedAudio } from '../../db/offlineDb'; // [1] เพิ่ม Import DB
 import './UploadPage.css';
 
 const UploadPage: React.FC = () => {
@@ -88,10 +89,31 @@ const UploadPage: React.FC = () => {
             if(nameNoExt) fileMap.set(nameNoExt, f);
         });
 
+        // เตรียม Array สำหรับบันทึกลง DB
+        const filesToCache: CachedAudio[] = [];
+
         matchedItems = metadata.map(m => {
             const file = fileMap.get(m.filename);
-            return file ? { ...m, audioPath: URL.createObjectURL(file) } : null;
+            if (file) {
+                // [2] เตรียมข้อมูลลง DB
+                filesToCache.push({
+                    filename: m.filename,
+                    blob: file,
+                    createdAt: Date.now()
+                });
+
+                // สร้าง Blob URL ชั่วคราวเพื่อให้เล่นได้ทันทีใน Session นี้
+                return { ...m, audioPath: URL.createObjectURL(file) };
+            }
+            return null;
         }).filter(Boolean) as AudioItem[];
+
+        // [3] บันทึกลง Offline DB ทันที (Bulk Put)
+        if (filesToCache.length > 0) {
+            setLoading(true, `Caching ${filesToCache.length} files to offline DB...`);
+            await db.audioCache.bulkPut(filesToCache);
+            console.log(`Saved ${filesToCache.length} files to offline cache.`);
+        }
 
         setAudioPath(localPathInput); // Save display name
       } 
