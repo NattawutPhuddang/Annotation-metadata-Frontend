@@ -389,6 +389,29 @@ const EditPage: React.FC = () => {
     };
   }, [playingFile, items, incorrectData, fileMap, playAudio]);
 
+  useEffect(() => {
+  // สร้าง timer สำหรับ debounce เพื่อไม่ให้ยิง API ถี่เกินไป
+  const timer = setTimeout(async () => {
+    // วนลูปเช็ครายการที่กำลังแก้ไข (edits)
+    for (const filename in edits) {
+      const newText = edits[filename];
+      const item = incorrectData.find(i => i.filename === filename);
+      
+      // ถ้ามีข้อความใหม่ และยังไม่มีการตัดคำไว้ใน Cache หรือคำไม่ตรงกัน
+      if (newText && item && !tokenCache.has(newText)) {
+        try {
+          // สั่งตัดคำใหม่ทันที (เรียกผ่าน inspectText หรือ audioService.tokenize)
+          await inspectText(newText); 
+        } catch (e) {
+          console.error("Auto tokenize failed", e);
+        }
+      }
+    }
+  }, 800); // รอ 0.8 วินาทีหลังพิมพ์หยุดถึงจะเริ่มตัดคำ
+
+  return () => clearTimeout(timer); // ล้าง timer เมื่อมีการพิมพ์ต่อ
+}, [edits, inspectText, tokenCache, incorrectData]);
+
   return (
     <div className="edit-container animate-fade-in">
       {/* --- Header & Toolbar --- */}
@@ -633,9 +656,9 @@ const EditPage: React.FC = () => {
 
                             <div className="mt-3 pl-1 border-t border-slate-100 pt-2">
                               <TokenizedText
-                                text={item.text}
+                                text={val} // เปลี่ยนจาก item.text เป็น val เพื่อให้ตัดคำตามที่พิมพ์จริง
                                 onInspect={inspectText}
-                                tokens={tokens}
+                                tokens={tokenCache.get(val) || tokens} // ดึง token จาก cache ตามข้อความล่าสุด
                                 isExpanded={isExpanded}
                                 suggestions={suggestions}
                                 appliedEdits={fileSmartEdits}
