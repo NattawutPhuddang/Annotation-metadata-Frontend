@@ -8,7 +8,7 @@ interface Props {
   isPlaying: boolean;
   onPlayChange?: (isPlaying: boolean) => void;
   progressColor?: string;
-  height?: string; // รับค่า class เช่น h-1, h-1.5
+  height?: string;
 }
 
 export const WaveformPlayer: React.FC<Props> = ({
@@ -22,15 +22,14 @@ export const WaveformPlayer: React.FC<Props> = ({
   const wavesurfer = useRef<WaveSurfer | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  // 1. เพิ่ม State เช็คความพร้อม
+  const [isReady, setIsReady] = useState(false);
 
-  // 🔴 ใช้ useRef เก็บ onPlayChange เพื่อไม่ให้ useEffect ทำงานซ้ำเมื่อ Parent Re-render
-  // นี่คือหัวใจสำคัญที่แก้บัค "พิมพ์แล้วเสียงเริ่มใหม่"
   const onPlayChangeRef = useRef(onPlayChange);
   useEffect(() => {
     onPlayChangeRef.current = onPlayChange;
   }, [onPlayChange]);
 
-  // Helper ดึง URL จริง (เผื่อกรณี Blob)
   const getCleanUrl = (url: string) => {
     if (!url) return '';
     const match = url.match(/(blob:.*)/);
@@ -42,28 +41,31 @@ export const WaveformPlayer: React.FC<Props> = ({
   useEffect(() => {
     if (!containerRef.current || !cleanUrl) return;
 
-    // สร้าง WaveSurfer
+    // รีเซ็ตสถานะเมื่อเปลี่ยน URL
+    setIsReady(false);
+
     const ws = WaveSurfer.create({
       container: containerRef.current,
-      waveColor: '#cbd5e1', // สีพื้นหลังเวฟ (slate-300)
+      waveColor: '#cbd5e1',
       progressColor: progressColor,
-      cursorColor: 'transparent', // ซ่อนเส้น Cursor ให้ดูคล้าย Slider เดิม
+      cursorColor: 'transparent',
       barWidth: 2,
       barRadius: 3,
       cursorWidth: 1,
-      height: 24, // ความสูงของ Waveform (pixel)
+      height: 24,
       barGap: 2,
       url: cleanUrl,
-      normalize: true, // ปรับเสียงให้กราฟดูเต็มสวย
-      interact: true,  // ให้ลาก Seek ได้
+      normalize: true,
+      interact: true,
       dragToSeek: true,
     });
 
     wavesurfer.current = ws;
 
-    // Events
     ws.on('ready', (d) => {
       setDuration(d);
+      // 2. แจ้งว่าพร้อมเล่นแล้ว
+      setIsReady(true);
     });
 
     ws.on('audioprocess', (t) => {
@@ -75,19 +77,20 @@ export const WaveformPlayer: React.FC<Props> = ({
     });
     
     ws.on('interaction', () => {
-      onPlayChangeRef.current?.(true); // สั่ง Parent ให้รู้ว่า "เล่นได้เลย"
-      // wavesurfer.current?.play(); // ตัว useEffect จะทำงานตาม state ที่เปลี่ยนไปเอง
+      onPlayChangeRef.current?.(true);
     });
 
-    // Cleanup
     return () => {
       ws.destroy();
+      // รีเซ็ตเมื่อ component unmount หรือเปลี่ยนไฟล์
+      setIsReady(false);
     };
-  }, [cleanUrl]); // ⚠️ Dependency มีแค่ URL (และสี) ไม่รวม onPlayChange แล้ว
+  }, [cleanUrl, progressColor]); // เพิ่ม progressColor ใน deps เพื่อความถูกต้อง
 
-  // Sync Play/Pause จาก Props (Parent Control)
+  // 3. ปรับ Logic การ Sync Play/Pause ให้รอ isReady ด้วย
   useEffect(() => {
-    if (!wavesurfer.current) return;
+    if (!wavesurfer.current || !isReady) return; // ถ้ายงไม่พร้อม ให้ข้ามไปก่อน
+    
     try {
         if (isPlaying) {
           wavesurfer.current.play();
@@ -97,9 +100,8 @@ export const WaveformPlayer: React.FC<Props> = ({
     } catch (e) {
         console.error("WaveSurfer error", e);
     }
-  }, [isPlaying]);
+  }, [isPlaying, isReady]); // ทำงานเมื่อ isPlaying เปลี่ยน หรือเมื่อ isReady เปลี่ยนเป็น true
   
-  // Format Time (MM:SS)
   const formatTime = (t: number) => {
     if (!t || isNaN(t)) return "0:00";
     const m = Math.floor(t / 60);
@@ -109,15 +111,12 @@ export const WaveformPlayer: React.FC<Props> = ({
 
   return (
     <div className="w-full flex flex-col">
-      {/* 🕒 Time Display: มุมขวาบนเหมือนเดิม */}
       <div className="flex justify-end mb-1">
         <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 tabular-nums leading-none">
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
       </div>
 
-      {/* 🎚️ Waveform Container */}
-      {/* ใช้ height จาก props เพื่อคุมขนาด container ให้เท่าเดิม */}
       <div 
         className={`waveform-wrapper w-full ${height} flex items-center bg-slate-50/50 rounded-lg overflow-hidden`}
       >
