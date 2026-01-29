@@ -298,54 +298,88 @@ const EditPage: React.FC = () => {
     idx: number,
     newWord: string | null,
   ) => {
+    // 1. ดึงข้อความดิบ (Raw Text) ที่มีวงเล็บอยู่
     const currentFullText = edits[item.filename] ?? item.text;
+    
+    // 2. ดึง Clean Text เพื่อเอามาหา Tokens ชุดปัจจุบัน
     const cleanedCurrentText = currentFullText.replace(/\(([^,]+),([^)]+)\)/g, '$2');
     const currentTokens = tokenCache.get(cleanedCurrentText);
 
     if (currentTokens) {
-      const updatedTokens = [...currentTokens];
-      
-      // ✅ บอก TypeScript ว่าตัวแปรนี้เก็บ SmartEditValue นะ
+      // ✅ LOGIC ใหม่: สร้างประโยคใหม่โดยรักษา "วงเล็บ" ของคำที่ไม่ได้แก้ไว้
+      let newResultText = "";
+      let remainingText = currentFullText; // ใช้สำหรับตัดข้อความทีละส่วน
+
+      // ตัวแปรสำหรับเก็บข้อมูลลง State (SmartEditValue)
       const currentFileEdits = { ...(smartEditsMap[item.filename] || {}) } as Record<number, SmartEditValue>;
       
+      // เก็บ original word ของคำที่กำลังจะแก้ (เอาไว้ใช้ตอน Undo)
+      let targetOriginalWord = currentTokens[idx];
+      const existingRecord = currentFileEdits[idx];
+      
+      if (typeof existingRecord === 'object' && existingRecord !== null && 'original' in existingRecord) {
+         targetOriginalWord = existingRecord.original;
+      } else if (typeof existingRecord === 'string') {
+         targetOriginalWord = currentTokens[idx];
+      }
+
+      // --- 🔄 Loop ไล่เช็ค Token ทีละตัวเทียบกับข้อความดิบ ---
+      for (let i = 0; i < currentTokens.length; i++) {
+        const token = currentTokens[i];
+        const isTarget = (i === idx); // คือคำที่เรากำลังคลิกแก้ใช่ไหม?
+
+        // Escape เพื่อใช้ใน Regex (กันเหนียวกรณีมีตัวอักษรแปลกๆ)
+        const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        // Regex นี้จะหาว่า Token นี้ในข้อความดิบ เป็นคำธรรมดา หรืออยู่ในวงเล็บ (...,token)
+        // อธิบาย: หา text ข้างหน้า (prefix) + ( กลุ่มวงเล็บที่ลงท้ายด้วย token หรือ ตัว token เอง )
+        const matchRegex = new RegExp(`^(.*?)(\\([^)]*?,${escapedToken}\\)|${escapedToken})`);
+        const match = remainingText.match(matchRegex);
+
+        if (match) {
+          const prefix = match[1];      // ช่องว่างหรืออักขระนำหน้า (ถ้ามี)
+          const rawSegment = match[2];  // ตัวคำจริงๆ ใน Textbox เช่น "ม้า" หรือ "(ยาว,ใหญ่)"
+
+          newResultText += prefix; // เติมส่วนนำหน้ากลับไปก่อน
+
+          if (isTarget) {
+            // 👉 ถ้าเป็นคำที่กำลังแก้: ให้ใช้คำใหม่ (หรือคำเดิมถ้า Undo)
+            if (newWord !== null) {
+              newResultText += newWord;
+            } else {
+              // กรณี Undo: เราคืนค่า targetOriginalWord (ซึ่งเป็นคำ Clean)
+              // หมายเหตุ: ถ้าแก้คำในวงเล็บไปแล้ว พอกด Undo วงเล็บจะหายไปเหลือแค่คำถูก (ซึ่งถูกต้องตาม logic การแก้แล้ว)
+              newResultText += targetOriginalWord;
+            }
+          } else {
+            // 👉 ถ้าไม่ใช่คำที่แก้: "เก็บของเดิมไว้ทั้งหมด" (รวมวงเล็บ) 🛡️
+            newResultText += rawSegment;
+          }
+
+          // ตัด text ส่วนที่ประมวลผลแล้วทิ้ง เพื่อไปหา token ถัดไป
+          remainingText = remainingText.slice(match[0].length);
+        } else {
+          // กรณีหาไม่เจอ (กันเหนียว) ให้เติม token ลงไปดื้อๆ
+          if (isTarget) {
+            newResultText += (newWord !== null ? newWord : targetOriginalWord);
+          } else {
+            newResultText += token;
+          }
+        }
+      }
+      
+      // เติมเศษข้อความที่เหลือต่อท้าย (ถ้ามี)
+      newResultText += remainingText;
+
+      // --- อัปเดต State ---
+
+      // จัดการ SmartEdit Map
       if (newWord !== null) {
-        // 👉 กรณี 1: เลือกคำใหม่ (Apply)
-        
-        const existingRecord = currentFileEdits[idx];
-        
-        // ✅ เช็ค Type ให้ชัวร์ก่อนดึงค่า
-        let originalWord = currentTokens[idx];
-        if (typeof existingRecord === 'object' && existingRecord !== null && 'original' in existingRecord) {
-             originalWord = existingRecord.original;
-        } else if (typeof existingRecord === 'string') {
-             // กรณีของเก่าเป็น string ให้ถือว่า token ปัจจุบันคือ original ไปก่อน
-             originalWord = currentTokens[idx];
-        }
-
-        updatedTokens[idx] = newWord;
-
-        // บันทึกแบบ Object
-        currentFileEdits[idx] = { correct: newWord, original: originalWord };
-
+        currentFileEdits[idx] = { correct: newWord, original: targetOriginalWord };
       } else {
-        // 👈 กรณี 2: กดซ้ำเพื่อยกเลิก (Undo)
-        
-        const record = currentFileEdits[idx];
-        
-        // ✅ เช็ค Type ก่อนใช้
-        if (record && typeof record === 'object' && 'original' in record) {
-            updatedTokens[idx] = record.original;
-        } else if (typeof record === 'string') {
-            // ถ้าของเก่าเป็น string ธรรมดา (เวอร์ชั่นเก่า) อาจจะกู้ไม่ได้แม่นยำ 
-            // แต่ใส่ logic กันตายไว้ ให้ใช้ token เดิมไป
-            updatedTokens[idx] = record; 
-        }
-        
         delete currentFileEdits[idx];
       }
 
-      const newResultText = updatedTokens.join("");
-      
       setEdits((prev) => ({
         ...prev,
         [item.filename]: newResultText,
