@@ -9,7 +9,7 @@ interface TokenizedTextProps {
   tokens?: string[];
   suggestions?: Map<string, string>;
   appliedEdits?: Record<number, string>;
-  onApplyCorrection?: (index: number, corrected: string | null) => void;
+  onApplyCorrection?: (index: number, corrected: string | null, original?: string) => void;
 }
 
 export const TokenizedText: React.FC<TokenizedTextProps> = ({
@@ -66,16 +66,19 @@ export const TokenizedText: React.FC<TokenizedTextProps> = ({
     if (nextState && !tokens) await loadTokens();
   };
 
-  const handleTokenClick = (idx: number, suggested: string | undefined) => {
-    if (!onApplyCorrection) return;
-    const isEdited = appliedEdits[idx] !== undefined;
+ const handleTokenClick = (idx: number, suggested: string | undefined) => {
+  if (!onApplyCorrection || !tokens) return;
+  
+  const isEdited = appliedEdits[idx] !== undefined;
+  const originalWord = tokens[idx]; // คำดั้งเดิมที่ได้จากการตัดคำครั้งล่าสุด
 
-    if (isEdited) {
-      onApplyCorrection(idx, null); // Undo
-    } else if (suggested) {
-      onApplyCorrection(idx, suggested); // Apply
-    }
-  };
+  if (isEdited) {
+    // ส่งคำเดิม (originalWord) กลับไปด้วยเพื่อให้ฝั่ง Page เอาไปแก้คืนในประโยค
+    onApplyCorrection(idx, null, originalWord); 
+  } else if (suggested) {
+    onApplyCorrection(idx, suggested); 
+  }
+};
 
   return (
     <div className="token-wrapper">

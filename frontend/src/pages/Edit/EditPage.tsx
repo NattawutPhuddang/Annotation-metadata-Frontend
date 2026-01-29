@@ -54,6 +54,8 @@ const AutoResizeTextarea: React.FC<
   );
 };
 
+type SmartEditValue = string | { correct: string; original: string };
+
 const EditPage: React.FC = () => {
   const {
     incorrectData,
@@ -86,7 +88,7 @@ const EditPage: React.FC = () => {
 
   // ✅ 2. โหลดข้อมูล Smart Edits (Token chips) ที่เลือกค้างไว้
   const [smartEditsMap, setSmartEditsMap] = useState<
-    Record<string, Record<number, string>>
+    Record<string, Record<number, SmartEditValue>>
   >(() => {
     try {
       const saved = localStorage.getItem("edit_smart_drafts");
@@ -291,24 +293,68 @@ const EditPage: React.FC = () => {
     if (e.code === "Slash" && e.ctrlKey) setIsGuideOpen((prev) => !prev);
   };
 
-  const handleSmartCorrection = (
+ const handleSmartCorrection = (
     item: AudioItem,
     idx: number,
     newWord: string | null,
   ) => {
-    const currentFileEdits = { ...(smartEditsMap[item.filename] || {}) };
-    if (newWord === null) delete currentFileEdits[idx];
-    else currentFileEdits[idx] = newWord;
+    const currentFullText = edits[item.filename] ?? item.text;
+    const cleanedCurrentText = currentFullText.replace(/\(([^,]+),([^)]+)\)/g, '$2');
+    const currentTokens = tokenCache.get(cleanedCurrentText);
 
-    setSmartEditsMap((prev) => ({
-      ...prev,
-      [item.filename]: currentFileEdits,
-    }));
+    if (currentTokens) {
+      const updatedTokens = [...currentTokens];
+      
+      // ✅ บอก TypeScript ว่าตัวแปรนี้เก็บ SmartEditValue นะ
+      const currentFileEdits = { ...(smartEditsMap[item.filename] || {}) } as Record<number, SmartEditValue>;
+      
+      if (newWord !== null) {
+        // 👉 กรณี 1: เลือกคำใหม่ (Apply)
+        
+        const existingRecord = currentFileEdits[idx];
+        
+        // ✅ เช็ค Type ให้ชัวร์ก่อนดึงค่า
+        let originalWord = currentTokens[idx];
+        if (typeof existingRecord === 'object' && existingRecord !== null && 'original' in existingRecord) {
+             originalWord = existingRecord.original;
+        } else if (typeof existingRecord === 'string') {
+             // กรณีของเก่าเป็น string ให้ถือว่า token ปัจจุบันคือ original ไปก่อน
+             originalWord = currentTokens[idx];
+        }
 
-    const tokens = tokenCache.get(item.text) || batchTokens[item.filename];
-    if (tokens) {
-      const newText = tokens.map((t, i) => currentFileEdits[i] || t).join("");
-      setEdits((prev) => ({ ...prev, [item.filename]: newText }));
+        updatedTokens[idx] = newWord;
+
+        // บันทึกแบบ Object
+        currentFileEdits[idx] = { correct: newWord, original: originalWord };
+
+      } else {
+        // 👈 กรณี 2: กดซ้ำเพื่อยกเลิก (Undo)
+        
+        const record = currentFileEdits[idx];
+        
+        // ✅ เช็ค Type ก่อนใช้
+        if (record && typeof record === 'object' && 'original' in record) {
+            updatedTokens[idx] = record.original;
+        } else if (typeof record === 'string') {
+            // ถ้าของเก่าเป็น string ธรรมดา (เวอร์ชั่นเก่า) อาจจะกู้ไม่ได้แม่นยำ 
+            // แต่ใส่ logic กันตายไว้ ให้ใช้ token เดิมไป
+            updatedTokens[idx] = record; 
+        }
+        
+        delete currentFileEdits[idx];
+      }
+
+      const newResultText = updatedTokens.join("");
+      
+      setEdits((prev) => ({
+        ...prev,
+        [item.filename]: newResultText,
+      }));
+
+      setSmartEditsMap((prev) => ({
+        ...prev,
+        [item.filename]: currentFileEdits,
+      }));
     }
   };
 
@@ -662,15 +708,25 @@ const EditPage: React.FC = () => {
 
                             <div className="mt-3 pl-1 border-t border-slate-100 pt-2">
                               <TokenizedText
-                                text={cleanedVal} // เปลี่ยนจาก item.text เป็น val เพื่อให้ตัดคำตามที่พิมพ์จริง
+                                text={cleanedVal}
                                 onInspect={inspectText}
-                                tokens={tokenCache.get(cleanedVal) || tokens} // ดึง token จาก cache ตามข้อความล่าสุด
+                                tokens={tokenCache.get(cleanedVal) || tokens}
                                 isExpanded={isExpanded}
                                 suggestions={suggestions}
-                                appliedEdits={fileSmartEdits}
-                                onApplyCorrection={(i, word) =>
-                                  handleSmartCorrection(item, i, word)
-                                }
+                                
+                                // ✅ ต้องแปลงข้อมูลตรงนี้ เพราะ fileSmartEdits ตอนนี้เก็บ Object ผสม String
+                                appliedEdits={Object.fromEntries(
+                                  Object.entries(fileSmartEdits).map(([k, v]) => {
+                                    // ถ้า v เป็น object ให้ดึง .correct ออกมา ถ้าเป็น string ให้ใช้เลย
+                                    const val = (typeof v === 'object' && v !== null && 'correct' in v) 
+                                                ? (v as any).correct 
+                                                : v;
+                                    return [k, val];
+                                  })
+                                )}
+
+                                // ✅ เรียกใช้ function
+                                onApplyCorrection={(i, word) => handleSmartCorrection(item, i, word)}
                               />
                             </div>
                           </div>
