@@ -11,7 +11,7 @@ import {
   Zap,
   Layers,
   FastForward,
-  Loader2,
+  Loader2,Megaphone
   
 } from "lucide-react";
 import { useAnnotation } from "../../context/AnnotationContext";
@@ -34,7 +34,10 @@ const AnnotationPage: React.FC = () => {
     inspectText,
     tokenCache,
     suggestions, 
-    setAudioFiles, // ADD THIS
+    setAudioFiles,
+    broadcastMessage,
+  incomingAnnouncement,
+  dismissAnnouncement
   } = useAnnotation();
 
   const [page, setPage] = useState(1);
@@ -59,6 +62,9 @@ const AnnotationPage: React.FC = () => {
 
   // Ref ป้องกัน Auto Play ทำงานซ้ำซ้อน
   const lastAutoPlayedRef = useRef<string | null>(null);
+
+  const [isAnnounceModalOpen, setIsAnnounceModalOpen] = useState(false);
+  const [announceText, setAnnounceText] = useState("");
 
   // Pagination
   const totalPages = Math.ceil(pendingItems.length / ITEMS_PER_PAGE);
@@ -283,6 +289,15 @@ const AnnotationPage: React.FC = () => {
 
         <div className="toolbar-right">
           {/* Toggle: Cut All (Batch) */}
+          <button 
+            className="btn-batch-toggle" // ใช้ class เดียวกันจะได้สวยๆ หรือจะสร้างใหม่ก็ได้
+            onClick={() => setIsAnnounceModalOpen(true)}
+            title="Send Announcement"
+            style={{ marginRight: '8px', backgroundColor: '#fdf2f8', color: '#db2777', borderColor: '#fce7f3' }}
+          >
+            <Megaphone size={16} />
+            <span>Announce</span>
+          </button>
           <button
             onClick={toggleBatchMode}
             disabled={isBatchLoading}
@@ -432,25 +447,73 @@ const AnnotationPage: React.FC = () => {
           />
         </aside>
       </div>
-      <Modal
-        isOpen={!!itemToDelete}
-        type="confirm"
-        title="Confirm Deletion"
-        message={`Are you sure you want to move "${itemToDelete?.filename}" to trash?`}
-        onClose={() => setItemToDelete(null)}
-        actions={[
-          {
-            label: "Cancel",
-            onClick: () => setItemToDelete(null),
-            variant: "secondary",
-          },
-          {
-            label: "Delete",
-            onClick: handleConfirmDelete,
-            variant: "danger", // สีแดง
-          },
-        ]}
-      />
+        <Modal
+          isOpen={!!itemToDelete}
+          type="confirm"
+          title="Confirm Deletion"
+          message={`Are you sure you want to move "${itemToDelete?.filename}" to trash?`}
+          onClose={() => setItemToDelete(null)}
+          actions={[
+            {
+              label: "Cancel",
+              onClick: () => setItemToDelete(null),
+              variant: "secondary",
+            },
+            {
+              label: "Delete",
+              onClick: handleConfirmDelete,
+              variant: "danger", // สีแดง
+            },
+          ]}
+        />
+        <Modal
+      isOpen={isAnnounceModalOpen}
+      type="confirm"
+      title="Broadcast Announcement"
+      message={
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-slate-500">Message will popup for ALL active users.</p>
+          <textarea 
+            className="w-full border rounded p-2 text-slate-700 focus:outline-indigo-500"
+            rows={3}
+            placeholder="Example: Server restarting in 5 mins..."
+            value={announceText}
+            onChange={e => setAnnounceText(e.target.value)}
+          />
+        </div>
+      }
+      onClose={() => setIsAnnounceModalOpen(false)}
+      actions={[
+        { label: "Cancel", onClick: () => setIsAnnounceModalOpen(false), variant: "secondary" },
+        { 
+          label: "Broadcast", 
+          onClick: async () => {
+            if(!announceText.trim()) return;
+            await broadcastMessage(announceText);
+            setAnnounceText("");
+            setIsAnnounceModalOpen(false);
+          }, 
+          variant: "danger" // ใช้สีแดง/ชมพูให้ดูสำคัญ
+        },
+      ]}
+    />
+
+    {/* --- Modal 2: สำหรับคนรับ (Receiver Popup) --- */}
+    {/* อันนี้จะเด้งเองอัตโนมัติเมื่อ incomingAnnouncement ใน Context เปลี่ยนค่า */}
+    <Modal
+      isOpen={!!incomingAnnouncement}
+      type="alert" // หรือ type info ถ้าคุณมี
+      title={`📢 Announcement from ${incomingAnnouncement?.sender || 'System'}`}
+      message={
+        <div className="text-lg font-medium text-center py-4 text-slate-700">
+          {incomingAnnouncement?.text}
+        </div>
+      }
+      onClose={dismissAnnouncement}
+      actions={[
+        { label: "Got it", onClick: dismissAnnouncement, variant: "primary" }
+      ]}
+    />
     </div>
   );
 };

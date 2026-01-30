@@ -2,7 +2,7 @@ import React from 'react';
 import { X, AlertCircle, CheckCircle, Info, AlertTriangle } from 'lucide-react';
 import './Modal.css';
 
-export type ModalType = 'info' | 'success' | 'warning' | 'error' | 'confirm';
+export type ModalType = 'info' | 'success' | 'warning' | 'error' | 'confirm' | 'alert';
 
 interface ModalAction {
   label: string;
@@ -15,7 +15,7 @@ interface ModalProps {
   isOpen: boolean;
   type?: ModalType;
   title: string;
-  message: string;
+  message: React.ReactNode;
   actions?: ModalAction[];
   onClose?: () => void;
   icon?: React.ReactNode;
@@ -98,7 +98,7 @@ export const Modal: React.FC<ModalProps> = ({
         {/* Content */}
         <div className="modal-body">
           <h2 className="modal-title">{title}</h2>
-          <p className="modal-message">{message}</p>
+          {typeof message === 'string' ? <p>{message}</p> : message}
         </div>
 
         {/* Footer */}

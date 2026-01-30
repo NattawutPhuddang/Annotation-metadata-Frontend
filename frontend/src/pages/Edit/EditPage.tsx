@@ -68,6 +68,7 @@ const EditPage: React.FC = () => {
     inspectText,
     suggestions,
     setIncorrectData,
+    moveToTrash
   } = useAnnotation();
 
   const [page, setPage] = useState(1);
@@ -184,14 +185,15 @@ const EditPage: React.FC = () => {
     }
   }, [firstItem, autoPlay, playingFile, playAudio]);
 
-  const handleConfirmDelete = async () => {
+ const handleConfirmDelete = async () => {
     if (!fileToDelete) return;
 
     try {
-      // สั่ง Backend ย้ายไฟล์
-      await audioService.moveToTrash(fileToDelete, "fail.tsv");
+      // ✅ 2. เปลี่ยนมาใช้ moveToTrash จาก Context
+      // ฟังก์ชันนี้จะจัดการทั้งย้ายไฟล์, อัปเดต TrashData (แก้เรื่อง Pending), และลบออกจาก IncorrectData ให้เอง
+      await moveToTrash(fileToDelete, "incorrect");
 
-      // ลบข้อมูล local state
+      // ลบข้อมูล local state (Draft ที่พิมพ์ค้างไว้)
       setEdits((prev) => {
         const c = { ...prev };
         delete c[fileToDelete];
@@ -203,17 +205,17 @@ const EditPage: React.FC = () => {
         return c;
       });
 
-      // ลบออกจากหน้าจอ
-      setIncorrectData((prev) =>
-        prev.filter((item) => item.filename !== fileToDelete),
-      );
+      // ❌ ไม่ต้องสั่ง setIncorrectData เองแล้ว เพราะ moveToTrash ใน Context ทำให้แล้ว
+      // setIncorrectData((prev) =>
+      //   prev.filter((item) => item.filename !== fileToDelete),
+      // );
+      
     } catch (e) {
       // alert("Delete failed");
     } finally {
       setFileToDelete(null); // ปิด Modal
     }
   };
-
   // --- Handlers ---
   const toggleBatchMode = async () => {
     if (isBatchMode) {
@@ -292,6 +294,9 @@ const EditPage: React.FC = () => {
 
     if (e.code === "Slash" && e.ctrlKey) setIsGuideOpen((prev) => !prev);
   };
+
+  
+
 
  const handleSmartCorrection = (
     item: AudioItem,

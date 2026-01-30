@@ -112,6 +112,23 @@ export const audioService = {
     return await res.json();
   },
 
+  async getAnnouncement(): Promise<{ text: string; timestamp: number; sender: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/api/announcement`);
+      return await res.json();
+    } catch {
+      return { text: "", timestamp: 0, sender: "" };
+    }
+  },
+
+  async sendAnnouncement(text: string, sender: string) {
+    await fetch(`${API_BASE}/api/announcement`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, sender }),
+    });
+  },
+
   // --- Utils ---
   getAudioUrl(path: string): string {
     if (!path) return "";

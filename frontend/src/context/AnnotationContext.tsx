@@ -39,9 +39,15 @@ interface AnnotationContextType {
   // Actions
   handleDecision: (item: AudioItem, status: "correct" | "incorrect", smartEdits?: Record<number, string>) => Promise<void>;
   handleCorrection: (item: AudioItem, newText: string) => Promise<void>;
+  moveToTrash: (filename: string, source?: "correct" | "incorrect") => Promise<void>;
   playAudio: (item: AudioItem) => void;
   playingFile: string | null;
   getFileName: (base: string) => string;
+
+  //แจ้งเตือน
+  broadcastMessage: (text: string) => Promise<void>; // ฟังก์ชันสำหรับคนส่ง
+  incomingAnnouncement: { text: string; sender: string } | null; // ข้อความที่ได้รับ
+  dismissAnnouncement: () => void; // ปิดข้อความ
 }
 
 const AnnotationContext = createContext<AnnotationContextType | undefined>(undefined);
@@ -66,6 +72,9 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [playingFile, setPlayingFile] = useState<string | null>(null);
   const [lastChangeMtime, setLastChangeMtime] = useState<number>(0);
   const [trashData, setTrashData] = useState<AudioItem[]>([]);
+
+  const [incomingAnnouncement, setIncomingAnnouncement] = useState<{ text: string; sender: string } | null>(null);
+  const [lastAnnounceTime, setLastAnnounceTime] = useState<number>(0);
 
   // --- Helper Methods ---
   const setLoading = (loading: boolean, msg = "") => {
@@ -142,6 +151,41 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return () => clearInterval(interval);
   }, [employeeId, lastChangeMtime]); // Added lastChangeMtime dependency to keep logic consistent with original
 
+  useEffect(() => {
+  const checkAnnouncement = async () => {
+    const data = await audioService.getAnnouncement();
+    // ถ้ามีข้อความ และ เวลาของข้อความ มากกว่า เวลาล่าสุดที่เคยรับ
+    // และต้องไม่เก่าเกินไป (เช่น เกิน 1 ชั่วโมงถือว่าเก่าแล้ว ไม่ต้องเด้ง)
+    const ONE_HOUR = 60 * 60 * 1000;
+    const isRecent = (Date.now() - data.timestamp) < ONE_HOUR;
+
+    if (data.text && data.timestamp > lastAnnounceTime && isRecent) {
+      setIncomingAnnouncement({ text: data.text, sender: data.sender });
+      setLastAnnounceTime(data.timestamp); // จำไว้ว่าอ่านอันนี้แล้ว
+    } else if (data.timestamp > lastAnnounceTime) {
+         // กรณีข้อความเก่ามากแล้ว แต่อัพเดท timestamp เพื่อกันเช็คซ้ำ
+         setLastAnnounceTime(data.timestamp);
+    }
+  };
+
+  // เรียกครั้งแรกทันที
+  checkAnnouncement();
+
+  // ตั้งเวลาเช็ควนไป
+  const interval = setInterval(checkAnnouncement, 5000);
+  return () => clearInterval(interval);
+}, [lastAnnounceTime]);
+
+// ฟังก์ชันส่งประกาศ (สำหรับ Admin กด)
+const broadcastMessage = async (text: string) => {
+  await audioService.sendAnnouncement(text, employeeId);
+};
+
+// ฟังก์ชันปิด Modal
+const dismissAnnouncement = () => {
+  setIncomingAnnouncement(null);
+};
+
   // --- Core Business Logic ---
 
   // 1. Inspect / Tokenize
@@ -176,6 +220,36 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             });
         }
     }
+
+    const moveToTrash = async (filename: string, source: "correct" | "incorrect" = "incorrect") => {
+    try {
+      // เรียก API (ที่แก้ Backend แล้ว) เพื่อย้ายไฟล์ลง Trash แบบไม่ Stack
+      await audioService.moveToTrash(filename, source === "correct" ? "Correct.tsv" : "fail.tsv");
+      
+      // หาข้อมูล item นั้น (เพื่อเอาไปใส่ใน trashData state)
+      const item = audioFiles.find(f => f.filename === filename) || 
+                   incorrectData.find(f => f.filename === filename) || 
+                   correctData.find(f => f.filename === filename) || 
+                   { filename, text: "" };
+
+      // Update State: เพิ่มลง Trash Data
+      setTrashData(prev => {
+          // กันซ้ำใน state
+          if (prev.some(t => t.filename === filename)) return prev;
+          return [...prev, item];
+      });
+
+      // Update State: ลบออกจาก Source เดิม
+      if (source === "correct") {
+        setCorrectData(prev => prev.filter(i => i.filename !== filename));
+      } else {
+        setIncorrectData(prev => prev.filter(i => i.filename !== filename));
+      }
+
+    } catch (error) {
+      console.error("Failed to move to trash", error);
+    }
+  };
 
     // Update State
     if (status === "correct") {
@@ -265,6 +339,40 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return map;
   }, [changes]);
 
+  const moveToTrash = async (filename: string, source: "correct" | "incorrect" = "incorrect") => {
+    try {
+      // 1. เรียก API ย้ายไฟล์ (Backend ต้องแก้แล้วตามขั้นตอนก่อนหน้า)
+      await audioService.moveToTrash(filename, source === "correct" ? "Correct.tsv" : "fail.tsv");
+      
+      // 2. หาข้อมูล item นั้นเพื่อเอามาใส่ใน trashData state
+      // (ค้นหาจากทุกที่เพราะบางทีอาจจะเพิ่งโหลดมา)
+      const item = audioFiles.find(f => f.filename === filename) || 
+                   incorrectData.find(f => f.filename === filename) || 
+                   correctData.find(f => f.filename === filename) || 
+                   { filename, text: "" }; // Fallback ถ้าหาไม่เจอ
+
+      // 3. Update State: เพิ่มลง Trash Data (เพื่อเอาไปหักลบกับ Pending)
+      setTrashData(prev => {
+          // กันซ้ำ
+          if (prev.some(t => t.filename === filename)) return prev;
+          return [...prev, item];
+      });
+
+      // 4. Update State: ลบออกจาก Source เดิม (Correct/Fail)
+      if (source === "correct") {
+        setCorrectData(prev => prev.filter(i => i.filename !== filename));
+      } else {
+        setIncorrectData(prev => prev.filter(i => i.filename !== filename));
+      }
+      
+      // ลบออกจาก audioFiles หลักด้วย (เผื่อกรณีมันยังค้างอยู่)
+      // setAudioFiles(prev => prev.filter(f => f.filename !== filename)); 
+
+    } catch (error) {
+      console.error("Failed to move to trash", error);
+    }
+  };
+
   // --- Refresh/Unload Handler (Silent - No Browser Dialog) ---
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -288,8 +396,10 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       audioPath, setAudioPath, hasStarted, setHasStarted,
       tokenCache, suggestions,  // ADD suggestions HERE
       inspectText,
-      handleDecision, handleCorrection,
-      playAudio, playingFile, getFileName
+      handleDecision, handleCorrection,moveToTrash,
+      playAudio, playingFile, getFileName,broadcastMessage, 
+      incomingAnnouncement, 
+      dismissAnnouncement
     }}>
       {children}
     </AnnotationContext.Provider>
