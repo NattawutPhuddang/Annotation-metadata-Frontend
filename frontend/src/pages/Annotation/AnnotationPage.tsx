@@ -37,7 +37,8 @@ const AnnotationPage: React.FC = () => {
     setAudioFiles,
     broadcastMessage,
   incomingAnnouncement,
-  dismissAnnouncement
+  dismissAnnouncement,
+  employeeId
   } = useAnnotation();
 
   const [page, setPage] = useState(1);
@@ -289,6 +290,7 @@ const AnnotationPage: React.FC = () => {
 
         <div className="toolbar-right">
           {/* Toggle: Cut All (Batch) */}
+          {employeeId === 'TN680058' && (
           <button 
             className="btn-batch-toggle" // ใช้ class เดียวกันจะได้สวยๆ หรือจะสร้างใหม่ก็ได้
             onClick={() => setIsAnnounceModalOpen(true)}
@@ -298,6 +300,7 @@ const AnnotationPage: React.FC = () => {
             <Megaphone size={16} />
             <span>Announce</span>
           </button>
+          )}
           <button
             onClick={toggleBatchMode}
             disabled={isBatchLoading}
