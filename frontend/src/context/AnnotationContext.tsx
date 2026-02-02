@@ -243,6 +243,19 @@ useEffect(() => {
   }, [employeeId]);
 
   useEffect(() => {
+    const loadEngine = async () => {
+        try {
+            // แจ้ง user หน่อยก็ดีถ้าทำได้ (Optional)
+            console.log("Initializing Offline AI Engine...");
+            await audioService.initTokenizer();
+        } catch (e) {
+            console.error("Failed to init PyThaiNLP:", e);
+        }
+    };
+    loadEngine();
+  }, []);
+
+  useEffect(() => {
   const checkAnnouncement = async () => {
     const data = await audioService.getAnnouncement();
     // ถ้ามีข้อความ และ เวลาของข้อความ มากกว่า เวลาล่าสุดที่เคยรับ

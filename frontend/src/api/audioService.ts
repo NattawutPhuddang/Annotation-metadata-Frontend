@@ -2,6 +2,7 @@
 import { API_BASE } from './client';
 import { AudioItem } from '../types';
 import { offlineManager } from './OfflineManager'; // import เข้ามา
+import { pyThaiNLPService } from "../utils/pyThaiNLPService"; // Import ตัวใหม่
 
 const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 2000) => {
     const controller = new AbortController();
@@ -71,6 +72,11 @@ export const syncOfflineActions = async () => {
 };
 
 export const audioService = {
+
+  async initTokenizer() {
+      // ขั้นตอนนี้ต้องต่อเน็ต (โหลด WASM และ Wheel)
+      await pyThaiNLPService.init();
+  },
   // --- Loading Data ---
   async loadTSV(filename: string): Promise<AudioItem[]> {
     try {
@@ -182,13 +188,22 @@ export const audioService = {
     return await res.json();
   },
 
-  async tokenizeBatch(texts: string[]): Promise<string[][]> {
-    const res = await fetch(`${API_BASE}/api/tokenize-batch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ texts }),
-    });
-    return await res.json();
+  async tokenizeBatch(texts: string[]) {
+    // ถ้า Python ยังโหลดไม่เสร็จ ให้พยายามโหลดก่อน (หรือถ้าไม่มีเน็ตตอนนี้อาจจะ Error ได้ถ้าเป็นครั้งแรก)
+    if (!pyThaiNLPService.isReady()) {
+        try {
+            await pyThaiNLPService.init();
+        } catch (e) {
+            throw new Error("PyThaiNLP failed to load (Need Internet for first run)");
+        }
+    }
+    
+    console.log("Tokenizing locally with PyThaiNLP (Python in Browser)...");
+    
+    // Loop ตัดคำทีละประโยค
+    const results = texts.map(text => pyThaiNLPService.tokenize(text));
+
+    return { results }; 
   },
 
   async scanAudio(path: string): Promise<string[]> {
