@@ -157,6 +157,7 @@ useEffect(() => {
         
         if (serverData) {
             // ถ้ามีเน็ต: ใช้ข้อมูล Server
+           console.log("Online Mode: Loaded from server");
             setCorrectData(serverData.correct.reverse());
             setIncorrectData(serverData.fail.reverse());
             setChanges(serverData.changes);

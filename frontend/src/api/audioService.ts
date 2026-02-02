@@ -3,6 +3,22 @@ import { API_BASE } from './client';
 import { AudioItem } from '../types';
 import { offlineManager } from './OfflineManager'; // import เข้ามา
 
+const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 2000) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+        clearTimeout(id);
+        return response;
+    } catch (error) {
+        clearTimeout(id);
+        throw error;
+    }
+};
+
 // เพิ่มฟังก์ชันสำหรับ Sync (จะถูกเรียกจาก Context หรือ App.tsx)
 export const syncOfflineActions = async () => {
   if (!navigator.onLine) return;
@@ -200,14 +216,20 @@ export const audioService = {
       body: JSON.stringify({ text, sender }),
     });
   },async fetchInitialData(employeeId: string) {
-      if (!navigator.onLine) return null; // ถ้าไม่มีเน็ต ให้ return null เพื่อให้ Frontend ใช้ของเก่าใน LocalStorage
+      if (!navigator.onLine) return null;
+
       try {
-          const res = await fetch(`${API_BASE}/api/sync/initial-state?userId=${employeeId}`);
-          if(!res.ok) throw new Error("Sync failed");
+          // 2. ยิง API แบบมี Timeout (2 วินาที)
+          // ถ้า Server ดับ หรือ Connect ไม่ได้ มันจะ Error ตรงนี้ทันที ไม่รอจน Timeout ยาวๆ
+          const res = await fetchWithTimeout(`${API_BASE}/api/sync/initial-state?userId=${employeeId}`, {}, 2000);
+          
+          if (!res.ok) throw new Error("Sync failed");
           return await res.json();
       } catch (e) {
-          console.error(e);
-          return null;
+          // 3. ถ้า Error (ไม่ว่าจะเน็ตหลุด, Server ดับ, หรือ Timeout)
+          // ให้ return null เพื่อบอกให้ Frontend ไปใช้ข้อมูล Local แทน
+          console.warn("[Initial Load] Server unreachable, switching to offline cache.");
+          return null; 
       }
   },
 
