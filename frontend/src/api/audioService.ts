@@ -9,10 +9,10 @@ import localforage from 'localforage'; // เพิ่ม import นี้เพ
 // ------------------------------------------------------------------
 export const syncOfflineActions = async () => {
   // เช็คก่อนว่า Online จริงไหม (ลอง Ping เบาๆ หรือเช็ค navigator)
-  if (!navigator.onLine) return;
+  if (!navigator.onLine) return false; // ไม่ได้ Sync
 
   const queue = await offlineManager.getQueue();
-  if (queue.length === 0) return;
+  if (queue.length === 0) return false; // ไม่ได้ Sync
 
   console.log(`[Sync] Processing ${queue.length} items...`);
 
@@ -69,13 +69,15 @@ export const syncOfflineActions = async () => {
   // บันทึกเฉพาะอันที่ยังไม่ผ่านกลับลง Storage
   // (อันที่ผ่านแล้วจะหายไปจากคิวเอง)
   if (failedQueue.length > 0) {
-      console.warn(`[Sync] ${failedQueue.length} items failed. Retrying later.`);
-      await localforage.setItem("offline_action_queue", failedQueue);
-  } else {
-      console.log("[Sync] All items synced successfully!");
-      await offlineManager.clearQueue();
-  }
-};
+        console.warn(`[Sync] ${failedQueue.length} items failed. Retrying later.`);
+        await localforage.setItem("offline_action_queue", failedQueue);
+        return true; // คืนค่า true เพราะมีการพยายาม Sync แล้ว
+    } else {
+        console.log("[Sync] All items synced successfully!");
+        await offlineManager.clearQueue();
+        return true; // คืนค่า true เพราะ Sync สำเร็จ
+    }
+  };
 
 // ------------------------------------------------------------------
 // 2. AudioService Object หลัก
