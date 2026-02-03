@@ -11,14 +11,12 @@ let isReady = false;
 const PYTHON_SETUP_CODE = `
 import micropip
 
-# 1. ติดตั้ง 'tzdata' (ที่เรามีไฟล์แล้ว)
-await micropip.install("/wheels/tzdata.whl")
+# 1. ติดตั้ง tzdata (เวอร์ชัน 2025.3)
+await micropip.install("/wheels/tzdata-2025.3-py2.py3-none-any.whl")
 
-# 2. ติดตั้ง 'pythainlp' แบบ deps=False 
-# (เพื่อไม่ให้มันร้องหา requests, numpy, pandas ที่เราไม่ได้โหลดมา)
-await micropip.install("/wheels/pythainlp.whl", deps=False)
+# 2. ติดตั้ง pythainlp (เวอร์ชัน 5.2.0)
+await micropip.install("/wheels/pythainlp-5.2.0-py3-none-any.whl", deps=False)
 
-# 3. Import
 from pythainlp.tokenize import word_tokenize
 from pythainlp.corpus import thai_words
 from pythainlp.util import Trie
