@@ -1,26 +1,11 @@
-// src/api/audioService.ts
 import { API_BASE } from './client';
 import { AudioItem } from '../types';
-import { offlineManager } from './OfflineManager'; // import เข้ามา
-import { pyThaiNLPService } from "../utils/pyThaiNLPService"; // Import ตัวใหม่
+import { offlineManager } from './OfflineManager';
+import { pyThaiNLPService } from "../utils/pyThaiNLPService";
 
-const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 2000) => {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
-    try {
-        const response = await fetch(url, {
-            ...options,
-            signal: controller.signal
-        });
-        clearTimeout(id);
-        return response;
-    } catch (error) {
-        clearTimeout(id);
-        throw error;
-    }
-};
-
-// เพิ่มฟังก์ชันสำหรับ Sync (จะถูกเรียกจาก Context หรือ App.tsx)
+// ------------------------------------------------------------------
+// 1. ฟังก์ชันสำหรับ Sync ข้อมูล (ที่เคย Error ว่าหาไม่เจอ)
+// ------------------------------------------------------------------
 export const syncOfflineActions = async () => {
   if (!navigator.onLine) return;
   
@@ -29,21 +14,22 @@ export const syncOfflineActions = async () => {
 
   console.log(`[Sync] Processing ${queue.length} offline actions...`);
 
-  // ยิง API ทีละตัว (หรือจะทำ Batch Endpoint ที่ Backend ก็ได้ แต่วิธีนี้ง่ายสุดไม่ต้องแก้ Backend เยอะ)
   for (const action of queue) {
     try {
       switch (action.type) {
         case "SAVE_CORRECT":
-            // เรียกใช้ endpoint เดิมที่มีอยู่แล้ว
+            // ยิง API สำหรับ Correct
             await fetch(`${API_BASE}/api/append-tsv`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ filename: "Correct.tsv", item: action.payload.item })
             });
-            // บันทึก Log ส่วนตัวด้วย
-            await fetch(`${API_BASE}/api/append-tsv`, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ filename: action.payload.logName, item: action.payload.item })
-            });
+            // ถ้ามี logName (Log ส่วนตัว) ก็ยิงด้วย
+            if (action.payload.logName) {
+                await fetch(`${API_BASE}/api/append-tsv`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ filename: action.payload.logName, item: action.payload.item })
+                });
+            }
             break;
             
         case "SAVE_FAIL":
@@ -62,7 +48,6 @@ export const syncOfflineActions = async () => {
       }
     } catch (err) {
       console.error("[Sync Failed] Action:", action, err);
-      // ถ้า Error อาจจะเก็บไว้ Retry ทีหลัง หรือข้ามไปก่อน
     }
   }
 
@@ -71,12 +56,17 @@ export const syncOfflineActions = async () => {
   console.log("[Sync] Completed.");
 };
 
+// ------------------------------------------------------------------
+// 2. AudioService Object หลัก
+// ------------------------------------------------------------------
 export const audioService = {
-
+  
+  // --- Initialization (ที่เคย Error ว่า initTokenizer หาย) ---
   async initTokenizer() {
-      // ขั้นตอนนี้ต้องต่อเน็ต (โหลด WASM และ Wheel)
+      // เรียกใช้ PyThaiNLP Service ให้โหลดเตรียมพร้อม
       await pyThaiNLPService.init();
   },
+
   // --- Loading Data ---
   async loadTSV(filename: string): Promise<AudioItem[]> {
     try {
@@ -113,19 +103,28 @@ export const audioService = {
       return [];
     }
   },
+
   async moveToTrash(filename: string, sourceFile: string = 'Correct.tsv') {
-    const res = await fetch(`${API_BASE}/api/move-to-trash`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename, sourceFile }),
-    });
-    if (!res.ok) throw new Error('Failed to move to trash');
-    return res.json();
+    if (!navigator.onLine) return; 
+    try {
+        const res = await fetch(`${API_BASE}/api/move-to-trash`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename, sourceFile }),
+        });
+        if (!res.ok) throw new Error('Failed to move to trash');
+        return res.json();
+    } catch (e) {
+        console.warn("Move to trash failed (Offline?)");
+    }
   },
 
   async checkFileMtime(filename: string): Promise<number> {
     try {
-      const res = await fetch(`${API_BASE}/api/check-mtime?filename=${filename}`);
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), 1000);
+      const res = await fetch(`${API_BASE}/api/check-mtime?filename=${filename}`, { signal: controller.signal });
+      clearTimeout(id);
       const data = await res.json();
       return data.mtime || 0;
     } catch {
@@ -133,134 +132,137 @@ export const audioService = {
     }
   },
 
-  // --- Saving Data ---
-  // --- Saving Data (Modified for Offline) ---
+  // --- Saving Data (Offline Supported) ---
+  
   async appendTsv(filename: string, item: AudioItem, logName?: string) {
-    if (!navigator.onLine) {
-        // 🔴 OFFLINE: ลง Queue
-        console.log("[Offline] Queued save:", filename);
+    const saveToOfflineQueue = async () => {
+        console.log(`[Offline Fallback] Saving ${filename} locally...`);
         if (filename.includes("Correct")) {
              await offlineManager.addAction("SAVE_CORRECT", { item, logName: logName || filename });
         } else if (filename.includes("fail")) {
              await offlineManager.addAction("SAVE_FAIL", { item });
         }
-        return; // จบการทำงานเสมือนว่าเซฟเสร็จแล้ว
+    };
+
+    if (!navigator.onLine) {
+        await saveToOfflineQueue();
+        return;
     }
 
-    // 🟢 ONLINE: ยิงจริง
-    await fetch(`${API_BASE}/api/append-tsv`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename, item }),
-    });
+    try {
+        const res = await fetch(`${API_BASE}/api/append-tsv`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename, item }),
+        });
+        if (!res.ok) throw new Error("Server error");
+    } catch (err) {
+        console.error("Online save failed, switching to offline queue:", err);
+        await saveToOfflineQueue();
+    }
   },
 
   async deleteTsvEntry(filename: string, key: string) {
+    const saveToOfflineQueue = async () => {
+         console.log(`[Offline Fallback] Deleting ${key} from ${filename} locally...`);
+         await offlineManager.addAction("DELETE_ENTRY", { filename, key });
+    };
+
     if (!navigator.onLine) {
-         // 🔴 OFFLINE: ลง Queue
-        await offlineManager.addAction("DELETE_ENTRY", { filename, key });
+         await saveToOfflineQueue();
          return;
     }
 
-    // 🟢 ONLINE
-    await fetch(`${API_BASE}/api/delete-tsv-entry`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename, key }),
-    });
+    try {
+        const res = await fetch(`${API_BASE}/api/delete-tsv-entry`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename, key }),
+        });
+        if (!res.ok) throw new Error("Server error");
+    } catch (err) {
+        console.error("Online delete failed, switching to offline queue:", err);
+        await saveToOfflineQueue();
+    }
   },
 
   async saveChangeLog(original: string, changed: string) {
-    await fetch(`${API_BASE}/api/append-change`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ original, changed }),
-    });
+     if (!navigator.onLine) return;
+     try {
+        await fetch(`${API_BASE}/api/append-change`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ original, changed }),
+        });
+     } catch (e) { console.warn("Failed to save changelog"); }
   },
 
-  // --- NLP & Processing ---
+  // --- NLP & Processing (Offline Supported) ---
+  
   async tokenize(text: string): Promise<string[]> {
-    // ถ้า Python ยังไม่พร้อม ให้พยายามโหลดก่อน
     if (!pyThaiNLPService.isReady()) {
-        try {
-            await pyThaiNLPService.init();
-        } catch (e) {
-            console.warn("Offline engine not ready, returning simple split.");
-            return text.split(' ');
-        }
+        try { await pyThaiNLPService.init(); } catch {}
     }
+    if (!pyThaiNLPService.isReady()) return text.split(' ');
     
-    // เรียกใช้ PyThaiNLP ที่ Frontend
     return pyThaiNLPService.tokenize(text);
   },
 
-  async tokenizeBatch(texts: string[]) {
-    // ถ้า Python ยังโหลดไม่เสร็จ ให้พยายามโหลดก่อน (หรือถ้าไม่มีเน็ตตอนนี้อาจจะ Error ได้ถ้าเป็นครั้งแรก)
+  async tokenizeBatch(texts: string[]): Promise<{ results: string[][] }> {
     if (!pyThaiNLPService.isReady()) {
-        try {
-            await pyThaiNLPService.init();
-        } catch (e) {
-            throw new Error("PyThaiNLP failed to load (Need Internet for first run)");
-        }
+        try { await pyThaiNLPService.init(); } catch {}
     }
-    
-    console.log("Tokenizing locally with PyThaiNLP (Python in Browser)...");
-    
-    // Loop ตัดคำทีละประโยค
-    const results = texts.map(text => pyThaiNLPService.tokenize(text));
-
-    return { results }; 
+    const results = texts.map(t => pyThaiNLPService.tokenize(t));
+    return { results };
   },
 
   async scanAudio(path: string): Promise<string[]> {
-    const res = await fetch(`${API_BASE}/api/scan-audio`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    });
-    return await res.json();
+    if (!navigator.onLine) return [];
+    try {
+        const res = await fetch(`${API_BASE}/api/scan-audio`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path }),
+        });
+        return await res.json();
+    } catch { return []; }
   },
 
+  // --- Misc ---
   async getAnnouncement(): Promise<{ text: string; timestamp: number; sender: string }> {
     try {
-      const res = await fetch(`${API_BASE}/api/announcement`);
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), 1000);
+      const res = await fetch(`${API_BASE}/api/announcement`, { signal: controller.signal });
+      clearTimeout(id);
       return await res.json();
-    } catch {
-      return { text: "", timestamp: 0, sender: "" };
-    }
+    } catch { return { text: "", timestamp: 0, sender: "" }; }
   },
 
   async sendAnnouncement(text: string, sender: string) {
-    await fetch(`${API_BASE}/api/announcement`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, sender }),
-    });
-  },async fetchInitialData(employeeId: string) {
+    if (!navigator.onLine) return;
+    try {
+        await fetch(`${API_BASE}/api/announcement`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, sender }),
+        });
+    } catch {}
+  },
+  
+  async fetchInitialData(employeeId: string) {
       if (!navigator.onLine) return null;
-
       try {
-          // 2. ยิง API แบบมี Timeout (2 วินาที)
-          // ถ้า Server ดับ หรือ Connect ไม่ได้ มันจะ Error ตรงนี้ทันที ไม่รอจน Timeout ยาวๆ
-          const res = await fetchWithTimeout(`${API_BASE}/api/sync/initial-state?userId=${employeeId}`, {}, 2000);
-          
-          if (!res.ok) throw new Error("Sync failed");
+          const controller = new AbortController();
+          const id = setTimeout(() => controller.abort(), 2000);
+          const res = await fetch(`${API_BASE}/api/sync/initial-state?userId=${employeeId}`, { signal: controller.signal });
+          clearTimeout(id);
+          if(!res.ok) throw new Error("Sync failed");
           return await res.json();
       } catch (e) {
-          // 3. ถ้า Error (ไม่ว่าจะเน็ตหลุด, Server ดับ, หรือ Timeout)
-          // ให้ return null เพื่อบอกให้ Frontend ไปใช้ข้อมูล Local แทน
           console.warn("[Initial Load] Server unreachable, switching to offline cache.");
-          return null; 
+          return null;
       }
   },
 
-  
-
-  // --- Utils ---
   getAudioUrl(path: string): string {
     if (!path) return "";
     if (path.startsWith("blob:") || path.startsWith("http")) return path;
     return `${API_BASE}/api/audio?path=${encodeURIComponent(path)}`;
   }
 };
-
