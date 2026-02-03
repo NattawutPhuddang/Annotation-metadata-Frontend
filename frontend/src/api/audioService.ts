@@ -180,12 +180,18 @@ export const audioService = {
 
   // --- NLP & Processing ---
   async tokenize(text: string): Promise<string[]> {
-    const res = await fetch(`${API_BASE}/api/tokenize`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    return await res.json();
+    // ถ้า Python ยังไม่พร้อม ให้พยายามโหลดก่อน
+    if (!pyThaiNLPService.isReady()) {
+        try {
+            await pyThaiNLPService.init();
+        } catch (e) {
+            console.warn("Offline engine not ready, returning simple split.");
+            return text.split(' ');
+        }
+    }
+    
+    // เรียกใช้ PyThaiNLP ที่ Frontend
+    return pyThaiNLPService.tokenize(text);
   },
 
   async tokenizeBatch(texts: string[]) {
