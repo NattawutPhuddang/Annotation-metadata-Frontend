@@ -229,7 +229,10 @@ const EditPage: React.FC = () => {
         );
         if (itemsToFetch.length > 0) {
           const texts = itemsToFetch.map((i) => i.text);
-          const results = await audioService.tokenizeBatch(texts);
+          
+          // 🔴 แก้ตรงนี้: ใส่ปีกกา { } ครอบ results
+          const { results } = await audioService.tokenizeBatch(texts);
+          
           const newBatch: Record<string, string[]> = {};
           itemsToFetch.forEach((item, idx) => {
             if (results[idx]) newBatch[item.filename] = results[idx];

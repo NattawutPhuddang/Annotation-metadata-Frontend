@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { AudioItem } from "../types";
-import { audioService } from "../api/audioService";
+import { audioService, syncOfflineActions } from "../api/audioService";
+import localforage from "localforage"; // Import เข้ามา
+import { offlineManager } from "../api/OfflineManager"; // เพิ่ม import
 
 // 1. Define Shape of Context
 interface AnnotationContextType {
@@ -48,6 +50,8 @@ interface AnnotationContextType {
   broadcastMessage: (text: string) => Promise<void>; // ฟังก์ชันสำหรับคนส่ง
   incomingAnnouncement: { text: string; sender: string } | null; // ข้อความที่ได้รับ
   dismissAnnouncement: () => void; // ปิดข้อความ
+  isOnline: boolean; // (น่าจะมีอยู่แล้วหรือเพิ่มเข้าไป)
+  pendingCount: number; // <--- เพิ่มตัวนี้
 }
 
 const AnnotationContext = createContext<AnnotationContextType | undefined>(undefined);
@@ -76,11 +80,51 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [incomingAnnouncement, setIncomingAnnouncement] = useState<{ text: string; sender: string } | null>(null);
   const [lastAnnounceTime, setLastAnnounceTime] = useState<number>(0);
 
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(0); // <
+
   // --- Helper Methods ---
   const setLoading = (loading: boolean, msg = "") => {
     setIsLoading(loading);
     setLoadingMsg(msg);
   };
+
+  const initData = useCallback(async () => {
+    if (!employeeId) return;
+    
+    // อย่าเพิ่งสั่ง setLoading(true) ตรงนี้ เพราะถ้ารีเฟรชตอน Auto Sync หน้าจะกระตุก
+    // อาจจะทำ Loading เล็กๆ หรือเช็ค context เอา
+    console.log("Loading data for:", employeeId);
+
+    const serverData = await audioService.fetchInitialData(employeeId);
+    
+    if (serverData) {
+        // Online: ใช้ข้อมูลจาก Server
+        console.log("Data loaded from server.");
+        setCorrectData(serverData.correct.reverse());
+        setIncorrectData(serverData.fail.reverse());
+        setChanges(serverData.changes);
+        
+        // Save cache
+        localforage.setItem('cached_correct', serverData.correct.reverse());
+        localforage.setItem('cached_fail', serverData.fail.reverse());
+        localforage.setItem('cached_changes', serverData.changes);
+    } else {
+        // Offline: ดึงจาก Cache
+        console.log("Offline or Server Down: Loading cached data.");
+        try {
+            const cachedCorrect = await localforage.getItem<AudioItem[]>('cached_correct');
+            const cachedFail = await localforage.getItem<AudioItem[]>('cached_fail');
+            const cachedChanges = await localforage.getItem<any[]>('cached_changes');
+
+            if (cachedCorrect) setCorrectData(cachedCorrect);
+            if (cachedFail) setIncorrectData(cachedFail);
+            if (cachedChanges) setChanges(cachedChanges);
+        } catch (err) {
+            console.error("Cache load error:", err);
+        }
+    }
+  }, [employeeId]); // จะเปลี่ยนใหม่เมื่อ employeeId เปลี่ยน
 
   const getFileName = useCallback((base: string) => `${employeeId}-${base}`, [employeeId]);
 
@@ -103,53 +147,234 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // --- Effects ---
   // Theme Effect
+
+  
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", isDarkMode ? "dark" : "light");
     localStorage.setItem("isDarkMode", JSON.stringify(isDarkMode));
   }, [isDarkMode]);
 
-  // Persist Data Effect
-  useEffect(() => {
-    if (employeeId) localStorage.setItem("employeeId", employeeId);
-    localStorage.setItem("hasStarted", JSON.stringify(hasStarted));
-    localStorage.setItem("audioPath", audioPath);
-    // Note: Don't persist full audioFiles with blob URLs if possible, strict to logic
-    const safeToSave = audioFiles.map((a) => ({ ...a, audioPath: "" })); 
-    localStorage.setItem("audioFiles", JSON.stringify(safeToSave));
-    localStorage.setItem("correctData", JSON.stringify(correctData));
-    localStorage.setItem("incorrectData", JSON.stringify(incorrectData));
-    localStorage.setItem("changes", JSON.stringify(changes));
-  }, [employeeId, hasStarted, audioPath, audioFiles, correctData, incorrectData, changes]);
+//   // Persist Data Effect
+//   useEffect(() => {
+//     if (employeeId) localStorage.setItem("employeeId", employeeId);
+//     localStorage.setItem("hasStarted", JSON.stringify(hasStarted));
+//     localStorage.setItem("audioPath", audioPath);
+//     // Note: Don't persist full audioFiles with blob URLs if possible, strict to logic
+//     const safeToSave = audioFiles.map((a) => ({ ...a, audioPath: "" })); 
+//     localStorage.setItem("audioFiles", JSON.stringify(safeToSave));
+//     localStorage.setItem("correctData", JSON.stringify(correctData));
+//     localStorage.setItem("incorrectData", JSON.stringify(incorrectData));
+//     localStorage.setItem("changes", JSON.stringify(changes));
+//   }, [employeeId, hasStarted, audioPath, audioFiles, correctData, incorrectData, changes]);
 
-  // Initial Load & Sync
+//     // 1. เพิ่ม Effect สำหรับเซฟข้อมูลลงเครื่องอัตโนมัติ เมื่อมีการเปลี่ยนแปลง
+// useEffect(() => {
+//   localStorage.setItem('cached_correct', JSON.stringify(correctData));
+//   localStorage.setItem('cached_fail', JSON.stringify(incorrectData));
+//   localStorage.setItem('cached_changes', JSON.stringify(changes));
+// }, [correctData, incorrectData, changes]);
+useEffect(() => {
+  const saveDataLocally = async () => {
+      try {
+          await Promise.all([
+              localforage.setItem('cached_correct', correctData),
+              localforage.setItem('cached_fail', incorrectData),
+              localforage.setItem('cached_changes', changes)
+          ]);
+      } catch (err) {
+          console.error("Error saving local cache:", err);
+      }
+  };
+  saveDataLocally();
+}, [correctData, incorrectData, changes]);
+
+  // 2. Initial Load Data (ปรับปรุงจากเดิม)
   useEffect(() => {
     if (!employeeId) return;
 
-    // Load initial data
-    Promise.all([
-      audioService.loadTSV("Correct.tsv"), 
-      audioService.loadTSV("fail.tsv"),
-      audioService.loadTSV("trash.tsv")
-    ]).then(([c, f,t]) => {
-      if (c.length) setCorrectData(c.reverse());
-      if (f.length) setIncorrectData(f.reverse());
-      if (t && t.length) setTrashData(t);
-    });
+    const initData = async () => {
+        setLoading(true, "Syncing data...");
+        
+        // ลองดึงจาก Server (กรณี Online)
+        const serverData = await audioService.fetchInitialData(employeeId);
+        
+        if (serverData) {
+            // ถ้ามีเน็ต: ใช้ข้อมูล Server
+           console.log("Online Mode: Loaded from server");
+            setCorrectData(serverData.correct.reverse());
+            setIncorrectData(serverData.fail.reverse());
+            setChanges(serverData.changes);
+        } else {
+            // 🔴 ถ้าไม่มีเน็ต (Offline): ดึงจาก LocalStorage ที่เราเซฟไว้
+            console.log("Offline mode: Loading cached data");
+            const cachedCorrect = localStorage.getItem('cached_correct');
+            const cachedFail = localStorage.getItem('cached_fail');
+            const cachedChanges = localStorage.getItem('cached_changes');
 
-    // Sync Logic
-    const syncChanges = async () => {
-      const serverMtime = await audioService.checkFileMtime("ListOfChange.tsv");
-      if (serverMtime !== lastChangeMtime && serverMtime !== 0) {
-        const newChanges = await audioService.loadChanges();
-        setChanges(newChanges);
-        setLastChangeMtime(serverMtime);
-      }
+            if (cachedCorrect) setCorrectData(JSON.parse(cachedCorrect));
+            if (cachedFail) setIncorrectData(JSON.parse(cachedFail));
+            if (cachedChanges) setChanges(JSON.parse(cachedChanges));
+        }
+        
+        setLoading(false);
     };
 
-    syncChanges();
-    const interval = setInterval(syncChanges, 10000);
+    initData();
+    
+    // ลอง Sync ของที่ค้างเผื่อมี
+    if (navigator.onLine) {
+        syncOfflineActions();
+    }
+  }, [employeeId]);
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+        // เช็คจำนวนคิวที่ค้างอยู่เสมอ (ไม่ว่า Online หรือ Offline)
+        const queue = await offlineManager.getQueue();
+        setPendingCount(queue.length); // <--- อัปเดตตัวเลข
+
+        const hasPending = queue.length > 0;
+        
+        if (hasPending && navigator.onLine) {
+            console.log("Auto Sync: Found pending items...");
+            const didSync = await syncOfflineActions();
+            if (didSync) {
+                await initData();
+                // เช็คอีกรอบหลัง Sync เสร็จ
+                const remaining = await offlineManager.getQueue();
+                setPendingCount(remaining.length);
+            }
+        }
+    }, 5000);
     return () => clearInterval(interval);
-  }, [employeeId, lastChangeMtime]); // Added lastChangeMtime dependency to keep logic consistent with original
+  }, [initData]);
+
+
+  useEffect(() => {
+    const saveDataLocally = async () => {
+        try {
+            // localforage เก็บ Object ได้เลย ไม่ต้อง JSON.stringify
+            await Promise.all([
+                localforage.setItem('cached_correct', correctData),
+                localforage.setItem('cached_fail', incorrectData),
+                localforage.setItem('cached_changes', changes)
+            ]);
+        } catch (err) {
+            console.error("Error saving local cache:", err);
+        }
+    };
+    saveDataLocally();
+  }, [correctData, incorrectData, changes]);
+  // ------------------------------------------------------------------
+  // 2. useEffect สำหรับการเข้าสู่ระบบครั้งแรก
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if(employeeId) {
+        setLoading(true, "Loading...");
+        initData().finally(() => setLoading(false));
+        
+        // โหลด Python Engine
+        audioService.initTokenizer();
+    }
+  }, [employeeId, initData]);
+
+  // ------------------------------------------------------------------
+  // 3. useEffect สำหรับ Auto Sync (ตอนนี้เรียก initData ได้แล้ว)
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    const interval = setInterval(async () => {
+        // อัปเดตตัวเลขคิวเสมอ
+        const queue = await offlineManager.getQueue();
+        setPendingCount(queue.length);
+
+        if (queue.length > 0 && navigator.onLine) {
+            console.log("Auto Sync: Found pending items...");
+            
+            // เรียก Sync และรับค่า boolean กลับมา
+            const didSync = await syncOfflineActions();
+            
+            if (didSync) {
+                console.log("Sync done! Refreshing data...");
+                await initData(); // <--- ไม่ Error แล้ว
+                
+                // อัปเดตตัวเลขคิวอีกรอบหลังทำเสร็จ
+                const remaining = await offlineManager.getQueue();
+                setPendingCount(remaining.length);
+            }
+        }
+    }, 5000); // เช็คทุก 5 วินาที
+
+    return () => clearInterval(interval);
+  }, [initData]); // ใส่ initData เป็น dependency
+
+  // ------------------------------------------------------------------
+  // 4. useEffect เช็คสถานะเน็ต (Listener)
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // 2. Initial Load Data (ปรับปรุงจากเดิม)
+  useEffect(() => {
+    if (!employeeId) return;
+
+    const initData = async () => {
+        setLoading(true, "Syncing data...");
+        
+        // ลองดึงจาก Server
+        const serverData = await audioService.fetchInitialData(employeeId);
+        
+        if (serverData) {
+            // Online: ใช้ข้อมูล Server
+            setCorrectData(serverData.correct.reverse());
+            setIncorrectData(serverData.fail.reverse());
+            setChanges(serverData.changes);
+        } else {
+            // Offline: ดึงจาก localforage
+            console.log("Offline mode: Loading cached data");
+            try {
+                const cachedCorrect = await localforage.getItem<AudioItem[]>('cached_correct');
+                const cachedFail = await localforage.getItem<AudioItem[]>('cached_fail');
+                const cachedChanges = await localforage.getItem<any[]>('cached_changes'); // หรือใส่ Type ให้ถูก
+
+                if (cachedCorrect) setCorrectData(cachedCorrect);
+                if (cachedFail) setIncorrectData(cachedFail);
+                if (cachedChanges) setChanges(cachedChanges);
+            } catch (err) {
+                console.error("Error loading local cache:", err);
+            }
+        }
+        
+        setLoading(false);
+    };
+
+    initData();
+    
+    if (navigator.onLine) {
+        syncOfflineActions();
+    }
+  }, [employeeId]);
+
+  useEffect(() => {
+    const loadEngine = async () => {
+        try {
+            // แจ้ง user หน่อยก็ดีถ้าทำได้ (Optional)
+            console.log("Initializing Offline AI Engine...");
+            await audioService.initTokenizer();
+        } catch (e) {
+            console.error("Failed to init PyThaiNLP:", e);
+        }
+    };
+    loadEngine();
+  }, []);
+
 
   useEffect(() => {
   const checkAnnouncement = async () => {
@@ -165,8 +390,13 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     } else if (data.timestamp > lastAnnounceTime) {
          // กรณีข้อความเก่ามากแล้ว แต่อัพเดท timestamp เพื่อกันเช็คซ้ำ
          setLastAnnounceTime(data.timestamp);
-    }
+    }    
   };
+
+  
+  
+  
+ 
 
   // เรียกครั้งแรกทันที
   checkAnnouncement();
@@ -175,6 +405,23 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const interval = setInterval(checkAnnouncement, 5000);
   return () => clearInterval(interval);
 }, [lastAnnounceTime]);
+
+useEffect(() => {
+    const interval = setInterval(async () => {
+        // 1. เช็คว่ามีของค้างในคิวไหม
+        const hasPending = await offlineManager.hasPendingActions();
+        
+        if (hasPending && navigator.onLine) {
+            console.log("Auto Sync: Found pending items, trying to sync...");
+            // เรียก Sync (ซึ่งตัวใหม่จะจัดการ error ให้เอง ไม่ต้องกลัวข้อมูลหาย)
+            syncOfflineActions();
+        }
+    }, 10000); // 10 วินาที
+
+    return () => clearInterval(interval);
+  }, []);
+
+  
 
 // ฟังก์ชันส่งประกาศ (สำหรับ Admin กด)
 const broadcastMessage = async (text: string) => {
@@ -203,6 +450,7 @@ const dismissAnnouncement = () => {
   // 2. Decision Logic (Correct/Fail)
   const handleDecision = async (item: AudioItem, status: "correct" | "incorrect", smartEdits?: Record<number, string>) => {
     let finalItem = { ...item };
+    const logName = getFileName("Correct.tsv");
 
     // Merge Smart Edits if any
     if (smartEdits && Object.keys(smartEdits).length > 0) {
@@ -249,19 +497,19 @@ const dismissAnnouncement = () => {
     } catch (error) {
       console.error("Failed to move to trash", error);
     }
-  };
-
+    };
+    
     // Update State
     if (status === "correct") {
       setCorrectData(prev => [finalItem, ...prev]);
       setIncorrectData(prev => prev.filter(i => i.filename !== finalItem.filename));
       
       // API Calls
-      await audioService.appendTsv("Correct.tsv", finalItem);
+      await audioService.appendTsv("Correct.tsv", finalItem, logName); // ส่ง logName
       await audioService.deleteTsvEntry("fail.tsv", finalItem.filename);
       
       // Log User Action
-      const logName = getFileName("Correct.tsv");
+      // const logName = getFileName("Correct.tsv");
       await audioService.appendTsv(logName, finalItem);
 
     } else {
@@ -269,11 +517,12 @@ const dismissAnnouncement = () => {
       setCorrectData(prev => prev.filter(i => i.filename !== finalItem.filename));
 
       // API Calls
-      await audioService.appendTsv("fail.tsv", finalItem);
+      await audioService.appendTsv("fail.tsv", finalItem); 
       await audioService.deleteTsvEntry("Correct.tsv", finalItem.filename);
+      await audioService.deleteTsvEntry(logName, finalItem.filename);
       
       // Delete User Log if exists
-      const logName = getFileName("Correct.tsv");
+      // const logName = getFileName("Correct.tsv");
       await audioService.deleteTsvEntry(logName, finalItem.filename); // Assuming using delete-tsv-entry logic
     }
   };
@@ -399,7 +648,9 @@ const dismissAnnouncement = () => {
       handleDecision, handleCorrection,moveToTrash,
       playAudio, playingFile, getFileName,broadcastMessage, 
       incomingAnnouncement, 
-      dismissAnnouncement
+      dismissAnnouncement,
+      isOnline,      // ส่งค่าไป
+        pendingCount,
     }}>
       {children}
     </AnnotationContext.Provider>

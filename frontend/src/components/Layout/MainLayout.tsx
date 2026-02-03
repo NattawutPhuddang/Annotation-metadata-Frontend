@@ -10,6 +10,7 @@ import AnnotationPage from '../../pages/Annotation/AnnotationPage';
 import CorrectPage from '../../pages/Correction/CorrectPage';
 import EditPage from '../../pages/Edit/EditPage';
 import DashboardPage from '../../pages/Dashboard/DashboardPage';
+import { NetworkStatus } from "../Shared/NetworkStatus"; // Import เข้ามา
 
 type Tab = "pending" | "correct" | "fail" | "dashboard";
 
@@ -44,7 +45,7 @@ const MainLayout: React.FC = () => {
       <header className="app-header">
         <div className="header-logo">
           <div className="logo-icon">
-            <Music size={20} />
+            <Music size={30} />
           </div>
           <div className="flex flex-col">
             <span className="font-semibold" style={{ color: 'var(--text-main)' }}>
@@ -53,6 +54,9 @@ const MainLayout: React.FC = () => {
             <span className="user-badge">
               USER: {employeeId}
             </span>
+            <div style={{ marginRight: '1rem' }}>
+            <NetworkStatus />
+        </div>
           </div>
         </div>
 

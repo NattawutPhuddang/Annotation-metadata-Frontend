@@ -121,22 +121,24 @@ const AnnotationPage: React.FC = () => {
 
       setIsBatchLoading(true);
       try {
-        // กรองเฉพาะอันที่ยังไม่มีใน Cache เพื่อลด Load
         const itemsToFetch = items.filter(
           (i) => !tokenCache.has(i.text) && !batchTokens[i.filename],
         );
 
         if (itemsToFetch.length > 0) {
           const texts = itemsToFetch.map((i) => i.text);
-          const results = await audioService.tokenizeBatch(texts);
+          
+          // 🔴 แก้ตรงนี้: ใส่ปีกกา { } ครอบ results เพื่อดึงค่า array ออกมาจาก object
+          const { results } = await audioService.tokenizeBatch(texts);
 
           const newBatch: Record<string, string[]> = {};
           itemsToFetch.forEach((item, idx) => {
+            // ตอนนี้ results เป็น array แล้ว เรียกใช้ [idx] ได้ปกติ
             if (results[idx]) newBatch[item.filename] = results[idx];
           });
           setBatchTokens((prev) => ({ ...prev, ...newBatch }));
         }
-        setIsBatchMode(true); // เปิดโหมด Batch หลังจากโหลดเสร็จ (หรือถ้ามี cache แล้วก็เปิดเลย)
+        setIsBatchMode(true); 
       } catch (error) {
         console.error("Batch tokenize failed", error);
       } finally {
