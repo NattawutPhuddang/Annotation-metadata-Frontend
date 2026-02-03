@@ -11,11 +11,14 @@ let isReady = false;
 const PYTHON_SETUP_CODE = `
 import micropip
 
-# 1. ติดตั้งจากไฟล์ local (wheels)
-# ต้องใส่ path ให้ตรงกับที่เราวางไว้ใน public
+# 1. ติดตั้ง 'tzdata' (ที่เรามีไฟล์แล้ว)
 await micropip.install("/wheels/tzdata.whl")
-await micropip.install("/wheels/pythainlp.whl")
 
+# 2. ติดตั้ง 'pythainlp' แบบ deps=False 
+# (เพื่อไม่ให้มันร้องหา requests, numpy, pandas ที่เราไม่ได้โหลดมา)
+await micropip.install("/wheels/pythainlp.whl", deps=False)
+
+# 3. Import
 from pythainlp.tokenize import word_tokenize
 from pythainlp.corpus import thai_words
 from pythainlp.util import Trie
@@ -61,7 +64,7 @@ export const pyThaiNLPService = {
     // 4. โหลด Custom Dict
     await pyThaiNLPService.loadCustomDict();
   },
-  
+
   loadCustomDict: async () => {
     if (!isReady) return;
     try {
