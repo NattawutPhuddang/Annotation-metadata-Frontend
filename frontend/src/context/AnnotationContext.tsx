@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { AudioItem } from "../types";
 import { audioService, syncOfflineActions } from "../api/audioService";
 import localforage from "localforage"; // Import เข้ามา
+import { offlineManager } from "../api/OfflineManager"; // เพิ่ม import
 
 // 1. Define Shape of Context
 interface AnnotationContextType {
@@ -273,6 +274,7 @@ useEffect(() => {
 
     
   };
+  
 
 
  
@@ -284,6 +286,21 @@ useEffect(() => {
   const interval = setInterval(checkAnnouncement, 5000);
   return () => clearInterval(interval);
 }, [lastAnnounceTime]);
+
+useEffect(() => {
+    const interval = setInterval(async () => {
+        // 1. เช็คว่ามีของค้างในคิวไหม
+        const hasPending = await offlineManager.hasPendingActions();
+        
+        if (hasPending && navigator.onLine) {
+            console.log("Auto Sync: Found pending items, trying to sync...");
+            // เรียก Sync (ซึ่งตัวใหม่จะจัดการ error ให้เอง ไม่ต้องกลัวข้อมูลหาย)
+            syncOfflineActions();
+        }
+    }, 10000); // 10 วินาที
+
+    return () => clearInterval(interval);
+  }, []);
 
 // ฟังก์ชันส่งประกาศ (สำหรับ Admin กด)
 const broadcastMessage = async (text: string) => {

@@ -2,58 +2,79 @@ import { API_BASE } from './client';
 import { AudioItem } from '../types';
 import { offlineManager } from './OfflineManager';
 import { pyThaiNLPService } from "../utils/pyThaiNLPService";
+import localforage from 'localforage'; // เพิ่ม import นี้เพื่อใช้เซฟคิวกลับ
 
 // ------------------------------------------------------------------
 // 1. ฟังก์ชันสำหรับ Sync ข้อมูล (ที่เคย Error ว่าหาไม่เจอ)
 // ------------------------------------------------------------------
 export const syncOfflineActions = async () => {
+  // เช็คก่อนว่า Online จริงไหม (ลอง Ping เบาๆ หรือเช็ค navigator)
   if (!navigator.onLine) return;
-  
+
   const queue = await offlineManager.getQueue();
   if (queue.length === 0) return;
 
-  console.log(`[Sync] Processing ${queue.length} offline actions...`);
+  console.log(`[Sync] Processing ${queue.length} items...`);
+
+  const failedQueue = []; // เอาไว้เก็บอันที่พลาด
 
   for (const action of queue) {
+    let success = false;
     try {
+      // ลอง Ping Server ก่อนยิงจริง เพื่อความชัวร์
+      // (ถ้า Server ดับ fetch จะ throw error ทันที)
       switch (action.type) {
         case "SAVE_CORRECT":
-            // ยิง API สำหรับ Correct
             await fetch(`${API_BASE}/api/append-tsv`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ filename: "Correct.tsv", item: action.payload.item })
-            });
-            // ถ้ามี logName (Log ส่วนตัว) ก็ยิงด้วย
+            }).then(res => { if(!res.ok) throw new Error("Status " + res.status) });
+
             if (action.payload.logName) {
                 await fetch(`${API_BASE}/api/append-tsv`, {
                     method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ filename: action.payload.logName, item: action.payload.item })
                 });
             }
+            success = true;
             break;
             
         case "SAVE_FAIL":
              await fetch(`${API_BASE}/api/append-tsv`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ filename: "fail.tsv", item: action.payload.item })
-            });
+            }).then(res => { if(!res.ok) throw new Error("Status " + res.status) });
+            success = true;
             break;
 
         case "DELETE_ENTRY":
              await fetch(`${API_BASE}/api/delete-tsv-entry`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ filename: action.payload.filename, key: action.payload.key })
-            });
+            }).then(res => { if(!res.ok) throw new Error("Status " + res.status) });
+            success = true;
             break;
       }
     } catch (err) {
-      console.error("[Sync Failed] Action:", action, err);
+      console.error(`[Sync Failed] ID: ${action.id}`, err);
+      success = false;
+    }
+
+    if (!success) {
+        // ถ้าไม่สำเร็จ ให้เก็บใส่ failedQueue ไว้รอรอบหน้า
+        failedQueue.push(action);
     }
   }
 
-  // เคลียร์คิวเมื่อเสร็จ
-  await offlineManager.clearQueue();
-  console.log("[Sync] Completed.");
+  // บันทึกเฉพาะอันที่ยังไม่ผ่านกลับลง Storage
+  // (อันที่ผ่านแล้วจะหายไปจากคิวเอง)
+  if (failedQueue.length > 0) {
+      console.warn(`[Sync] ${failedQueue.length} items failed. Retrying later.`);
+      await localforage.setItem("offline_action_queue", failedQueue);
+  } else {
+      console.log("[Sync] All items synced successfully!");
+      await offlineManager.clearQueue();
+  }
 };
 
 // ------------------------------------------------------------------
