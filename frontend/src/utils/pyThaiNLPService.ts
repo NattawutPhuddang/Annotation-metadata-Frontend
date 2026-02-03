@@ -7,10 +7,14 @@ declare global {
 let pyodide: any = null;
 let isReady = false;
 
-// โค้ด Python สำหรับ setup
+// โค้ด Python setup (เหมือนเดิม)
 const PYTHON_SETUP_CODE = `
 import micropip
-await micropip.install("pythainlp")
+
+# 1. ติดตั้งจากไฟล์ local (wheels)
+# ต้องใส่ path ให้ตรงกับที่เราวางไว้ใน public
+await micropip.install("/wheels/tzdata.whl")
+await micropip.install("/wheels/pythainlp.whl")
 
 from pythainlp.tokenize import word_tokenize
 from pythainlp.corpus import thai_words
@@ -35,38 +39,29 @@ export const pyThaiNLPService = {
   init: async () => {
     if (isReady) return;
 
-    console.log("Checking Pyodide availability...");
+    console.log("Initializing Pyodide (Local Offline Mode)...");
 
-    // 🔴 1. เช็คว่ามีฟังก์ชัน loadPyodide หรือยัง ถ้ายังไม่มี ให้โหลด Script เองเดี๋ยวนี้เลย
-    if (typeof window.loadPyodide !== "function") {
-        console.log("Pyodide script not loaded. Loading dynamically...");
-        await new Promise<void>((resolve, reject) => {
-            const script = document.createElement("script");
-            script.src = "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js";
-            script.onload = () => {
-                console.log("Pyodide script loaded successfully.");
-                resolve();
-            };
-            script.onerror = (e) => reject(new Error("Failed to load Pyodide script"));
-            document.head.appendChild(script);
-        });
-    }
+    // ไม่ต้องเช็ค loadPyodide แล้ว เพราะเราใส่ script ไว้ใน index.html แล้วและเป็น local file
+    
+    // 1. โหลด Pyodide โดยบอก path ว่าไฟล์ .wasm/.zip อยู่ที่ไหน
+    // indexURL: "/pyodide" คือบอกให้ไปหาไฟล์ที่ folder public/pyodide
+    pyodide = await window.loadPyodide({
+        indexURL: "/pyodide"
+    });
 
-    // 2. ถึงตรงนี้มั่นใจได้ว่า window.loadPyodide มีตัวตนแล้ว
-    console.log("Initializing Pyodide...");
-    pyodide = await window.loadPyodide();
-
-    // 3. โหลด micropip และรัน setup code
+    // 2. โหลด micropip (มันมีมากับ Pyodide อยู่แล้วใน repodata.json)
     await pyodide.loadPackage("micropip");
+    
+    // 3. รัน setup (ซึ่งจะไปโหลด .whl จาก folder wheels)
     await pyodide.runPythonAsync(PYTHON_SETUP_CODE);
 
     isReady = true;
-    console.log("PyThaiNLP is ready!");
+    console.log("PyThaiNLP (Offline) is ready!");
 
-    // 4. โหลด Custom Dict ต่อทันที
+    // 4. โหลด Custom Dict
     await pyThaiNLPService.loadCustomDict();
   },
-
+  
   loadCustomDict: async () => {
     if (!isReady) return;
     try {
