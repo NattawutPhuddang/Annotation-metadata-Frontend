@@ -11,16 +11,17 @@ let isReady = false;
 const PYTHON_SETUP_CODE = `
 import micropip
 
-# 1. ติดตั้ง tzdata (เวอร์ชัน 2025.3)
+# 1. ติดตั้ง tzdata
 await micropip.install("/wheels/tzdata-2025.3-py2.py3-none-any.whl")
 
-# 2. ติดตั้ง pythainlp (เวอร์ชัน 5.2.0)
+# 2. ติดตั้ง pythainlp (deps=False)
 await micropip.install("/wheels/pythainlp-5.2.0-py3-none-any.whl", deps=False)
 
 from pythainlp.tokenize import word_tokenize
 from pythainlp.corpus import thai_words
 from pythainlp.util import Trie
 
+# ... (Logic เดิม) ...
 custom_words = set(thai_words())
 custom_trie = Trie(custom_words)
 
@@ -42,24 +43,29 @@ export const pyThaiNLPService = {
 
     console.log("Initializing Pyodide (Local Offline Mode)...");
 
-    // ไม่ต้องเช็ค loadPyodide แล้ว เพราะเราใส่ script ไว้ใน index.html แล้วและเป็น local file
-    
-    // 1. โหลด Pyodide โดยบอก path ว่าไฟล์ .wasm/.zip อยู่ที่ไหน
-    // indexURL: "/pyodide" คือบอกให้ไปหาไฟล์ที่ folder public/pyodide
+    // 1. โหลด Pyodide Core
     pyodide = await window.loadPyodide({
         indexURL: "/pyodide"
     });
 
-    // 2. โหลด micropip (มันมีมากับ Pyodide อยู่แล้วใน repodata.json)
-    await pyodide.loadPackage("micropip");
+    // 2. โหลด Micropip และ Packaging แบบระบุไฟล์ตรงๆ (Manual Load)
+    // เพื่อความชัวร์ว่ามันจะไม่งงกับ repodata.json
+    console.log("Loading micropip from local wheels...");
+    try {
+        await pyodide.loadPackage("/pyodide/packaging-23.1-py3-none-any.whl");
+        await pyodide.loadPackage("/pyodide/micropip-0.5.0-py3-none-any.whl");
+    } catch (e) {
+        console.error("Failed to load micropip/packaging wheels. Please check filenames in public/pyodide/", e);
+        throw e;
+    }
     
-    // 3. รัน setup (ซึ่งจะไปโหลด .whl จาก folder wheels)
+    // 3. รัน Setup Script
+    console.log("Installing PyThaiNLP...");
     await pyodide.runPythonAsync(PYTHON_SETUP_CODE);
 
     isReady = true;
     console.log("PyThaiNLP (Offline) is ready!");
 
-    // 4. โหลด Custom Dict
     await pyThaiNLPService.loadCustomDict();
   },
 
