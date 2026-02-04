@@ -4,16 +4,15 @@ import {
   X,
   Play,
   Pause,
-  Info,
   Trash2,
-  ChevronsRight,
-  BookOpen,
+  FastForward,
+  Loader2,
+  Megaphone,
   Zap,
   Layers,
-  FastForward,
-  Loader2,Megaphone
-  
+  RotateCcw, 
 } from "lucide-react";
+
 import { useAnnotation } from "../../context/AnnotationContext";
 import { WaveformPlayer } from "../../components/AudioPlayer/WaveformPlayer";
 import { TokenizedText } from "../../components/Tokenizer/TokenizedText";
@@ -31,43 +30,51 @@ const AnnotationPage: React.FC = () => {
     handleDecision,
     playAudio,
     playingFile,
-    inspectText,
     tokenCache,
-    suggestions, 
     setAudioFiles,
     broadcastMessage,
-  incomingAnnouncement,
-  dismissAnnouncement,
-  employeeId
+    incomingAnnouncement,
+    dismissAnnouncement,
+    employeeId,
+    inspectText,
+    suggestions,
   } = useAnnotation();
 
   const [page, setPage] = useState(1);
+  const [isGuideOpen, setIsGuideOpen] = useState(true);
+
+  // --- State ---
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [savingFiles, setSavingFiles] = useState<Record<string, boolean>>({});
+
+  // Tokens
+  const [liveTokens, setLiveTokens] = useState<Record<string, string[]>>({});
+  const [batchTokens, setBatchTokens] = useState<Record<string, string[]>>({});
   const [smartEdits, setSmartEdits] = useState<
     Record<string, Record<number, string>>
   >({});
-  const [isGuideOpen, setIsGuideOpen] = useState(true);
 
-  // --- Automation States (Load from LocalStorage) ---
+  // Loading & Refs
+  const [isTokenizing, setIsTokenizing] = useState<Record<string, boolean>>({});
+  const isManualTyping = useRef<boolean>(false);
+
+  // --- Automation ---
   const [autoPlay, setAutoPlay] = useState(() =>
     JSON.parse(localStorage.getItem("anno_autoPlay") || "false"),
   );
   const [autoTokenize, setAutoTokenize] = useState(() =>
-    JSON.parse(localStorage.getItem("anno_autoTokenize") || "false"),
+    JSON.parse(localStorage.getItem("anno_autoTokenize") || "true"),
   );
 
-  // Batch Mode State (Cut All)
+  // --- Batch Mode (Cut All) ---
   const [isBatchMode, setIsBatchMode] = useState(false);
-  const [batchTokens, setBatchTokens] = useState<Record<string, string[]>>({});
   const [isBatchLoading, setIsBatchLoading] = useState(false);
+
   const [itemToDelete, setItemToDelete] = useState<any | null>(null);
-
-  // Ref ป้องกัน Auto Play ทำงานซ้ำซ้อน
   const lastAutoPlayedRef = useRef<string | null>(null);
-
   const [isAnnounceModalOpen, setIsAnnounceModalOpen] = useState(false);
   const [announceText, setAnnounceText] = useState("");
 
-  // Pagination
   const totalPages = Math.ceil(pendingItems.length / ITEMS_PER_PAGE);
   const items = pendingItems.slice(
     (page - 1) * ITEMS_PER_PAGE,
@@ -75,34 +82,107 @@ const AnnotationPage: React.FC = () => {
   );
   const firstItem = items[0];
 
-  // --- Persistence Effects ---
+  // --- Effects ---
   useEffect(() => {
     localStorage.setItem("anno_autoPlay", JSON.stringify(autoPlay));
   }, [autoPlay]);
+
   useEffect(() => {
     localStorage.setItem("anno_autoTokenize", JSON.stringify(autoTokenize));
   }, [autoTokenize]);
 
-  // Reset Batch Mode เมื่อเปลี่ยนหน้า (Pagination)
+  // Reset State on Page Change
   useEffect(() => {
+    setEdits({});
     setIsBatchMode(false);
+    setLiveTokens({});
+    setBatchTokens({});
+    setSmartEdits({});
   }, [page]);
 
-  // --- Automation Logic ---
+  // Auto Fetch on Mount
+  useEffect(() => {
+    const fetchInitialTokens = async () => {
+      // ✅ แก้คืน: ให้โหลด Token ของ "ทุก Item" ในหน้านี้ (ถ้ายังไม่มีใน Cache)
+      // ไม่ต้องรอ autoTokenize หรือเช็คว่าเป็นตัวแรก
+      const itemsToFetch = items.filter(
+        (item) => !tokenCache.has(item.text) && !batchTokens[item.filename]
+      );
+
+      if (itemsToFetch.length === 0) return;
+
+      try {
+        const texts = itemsToFetch.map((i) => i.text);
+        const { results } = await audioService.tokenizeBatch(texts);
+        const newTokens: Record<string, string[]> = {};
+        itemsToFetch.forEach((item, idx) => {
+          if (results[idx]) newTokens[item.filename] = results[idx];
+        });
+        setBatchTokens((prev) => ({ ...prev, ...newTokens }));
+      } catch (err) {
+        console.error("Initial fetch failed", err);
+      }
+    };
+
+    fetchInitialTokens();
+  }, [items, tokenCache]); // เอา autoTokenize ออกจาก dependency
+
+  // Real-time Tokenizer (Typing)
+  useEffect(() => {
+    const handler = setTimeout(async () => {
+      if (!isManualTyping.current) return;
+
+      const filesToUpdate = Object.keys(edits).filter((filename) => {
+        const currentText = edits[filename];
+        if (!currentText) return false;
+        const currentTokens = liveTokens[filename] || batchTokens[filename];
+        if (currentTokens && currentTokens.join("") === currentText)
+          return false;
+        return true;
+      });
+
+      if (filesToUpdate.length === 0) return;
+
+      const loadingState = { ...isTokenizing };
+      filesToUpdate.forEach((f) => (loadingState[f] = true));
+      setIsTokenizing(loadingState);
+
+      try {
+        const texts = filesToUpdate.map((f) => edits[f]);
+        const { results } = await audioService.tokenizeBatch(texts);
+        const newLiveTokens: Record<string, string[]> = {};
+
+        filesToUpdate.forEach((filename, idx) => {
+          if (results[idx]) newLiveTokens[filename] = results[idx];
+        });
+
+        setLiveTokens((prev) => ({ ...prev, ...newLiveTokens }));
+
+        setSmartEdits((prev) => {
+          const next = { ...prev };
+          filesToUpdate.forEach((f) => delete next[f]);
+          return next;
+        });
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsTokenizing({});
+        isManualTyping.current = false;
+      }
+    }, 800);
+
+    return () => clearTimeout(handler);
+  }, [edits]);
+
+  // Auto Play
   useEffect(() => {
     if (!firstItem) return;
-
     const isNewFile = firstItem.filename !== lastAutoPlayedRef.current;
-
     if (isNewFile) {
       lastAutoPlayedRef.current = firstItem.filename;
-
-      // 1. Auto Play Logic
       if (autoPlay) {
         setTimeout(() => {
-          if (playingFile !== firstItem.filename) {
-            playAudio(firstItem);
-          }
+          if (playingFile !== firstItem.filename) playAudio(firstItem);
         }, 300);
       }
     }
@@ -110,72 +190,75 @@ const AnnotationPage: React.FC = () => {
 
   // --- Handlers ---
 
-  // Toggle Cut All
   const toggleBatchMode = async () => {
     if (isBatchMode) {
-      // ถ้าเปิดอยู่ -> ปิด (หุบทั้งหมด)
       setIsBatchMode(false);
     } else {
-      // ถ้าปิดอยู่ -> เปิด (ขยายทั้งหมด และโหลด)
-      if (items.length === 0) return;
-
       setIsBatchLoading(true);
       try {
-        const itemsToFetch = items.filter(
-          (i) => !tokenCache.has(i.text) && !batchTokens[i.filename],
-        );
-
-        if (itemsToFetch.length > 0) {
-          const texts = itemsToFetch.map((i) => i.text);
-          
-          // 🔴 แก้ตรงนี้: ใส่ปีกกา { } ครอบ results เพื่อดึงค่า array ออกมาจาก object
-          const { results } = await audioService.tokenizeBatch(texts);
-
-          const newBatch: Record<string, string[]> = {};
-          itemsToFetch.forEach((item, idx) => {
-            // ตอนนี้ results เป็น array แล้ว เรียกใช้ [idx] ได้ปกติ
-            if (results[idx]) newBatch[item.filename] = results[idx];
-          });
-          setBatchTokens((prev) => ({ ...prev, ...newBatch }));
-        }
-        setIsBatchMode(true); 
+        const texts = items.map((i) => edits[i.filename] || i.text);
+        const { results } = await audioService.tokenizeBatch(texts);
+        const newBatch: Record<string, string[]> = {};
+        items.forEach((item, idx) => {
+          if (results[idx]) newBatch[item.filename] = results[idx];
+        });
+        setBatchTokens((prev) => ({ ...prev, ...newBatch }));
+        setIsBatchMode(true);
       } catch (error) {
-        console.error("Batch tokenize failed", error);
+        console.error("Batch failed", error);
       } finally {
         setIsBatchLoading(false);
       }
     }
   };
 
-  const handleConfirmDelete = async () => {
-    if (!itemToDelete) return;
+  const handleTextChange = (filename: string, newText: string) => {
+    isManualTyping.current = true;
+    setEdits((prev) => ({ ...prev, [filename]: newText }));
+  };
 
-    try {
-      // Step A: บันทึกลง trash.tsv
-      await audioService.appendTsv('trash.tsv', itemToDelete);
-      
-      // Step B: ลบออกจากหน้าจอ
-      setAudioFiles(prev => prev.filter(f => f.filename !== itemToDelete.filename));
-
-      // Cleanup
-      setSmartEdits(prev => { const n={...prev}; delete n[itemToDelete.filename]; return n; });
-      
-    } catch (error) {
-      // alert("Error deleting item");
-    } finally {
-      setItemToDelete(null); // ปิด Modal
-    }
+  // ✅ ฟังก์ชัน Reset กลับเป็นค่าเดิม
+  const handleReset = (filename: string) => {
+    // 1. ลบข้อมูลการแก้ไข (Text)
+    setEdits((prev) => {
+      const n = { ...prev };
+      delete n[filename];
+      return n;
+    });
+    // 2. ลบ Token ที่เกิดจากการพิมพ์ (Live Token)
+    setLiveTokens((prev) => {
+      const n = { ...prev };
+      delete n[filename];
+      return n;
+    });
+    // 3. ลบ Smart Edits (การแก้รายคำ)
+    setSmartEdits((prev) => {
+      const n = { ...prev };
+      delete n[filename];
+      return n;
+    });
+    // 4. Reset สถานะการพิมพ์
+    isManualTyping.current = false;
   };
 
   const handleSmartCorrection = (
     filename: string,
     idx: number,
     newWord: string | null,
+    baseTokens: string[],
   ) => {
+    isManualTyping.current = false;
     setSmartEdits((prev) => {
       const fileEdits = { ...(prev[filename] || {}) };
       if (newWord === null) delete fileEdits[idx];
       else fileEdits[idx] = newWord;
+
+      const newTokens = baseTokens.map((token, i) =>
+        fileEdits[i] !== undefined ? fileEdits[i] : token,
+      );
+      const finalText = newTokens.filter((t) => t !== "").join("");
+      
+      setEdits((prevEdits) => ({ ...prevEdits, [filename]: finalText }));
 
       if (Object.keys(fileEdits).length === 0) {
         const next = { ...prev };
@@ -186,50 +269,91 @@ const AnnotationPage: React.FC = () => {
     });
   };
 
+  // ✅ Fix Logic Save: ใช้ itemToSave แทนการแก้ที่ Backend โดยตรง
+  const handleCorrect = async (item: any) => {
+    const editedText = edits[item.filename];
+    const finalText = (editedText !== undefined) ? editedText : item.text;
+    const itemToSave = { ...item, text: finalText };
+
+    if (editedText !== undefined && editedText !== item.text) {
+      setAudioFiles((prev) =>
+        prev.map((f) =>
+          f.filename === item.filename ? { ...f, text: editedText } : f,
+        ),
+      );
+    }
+
+    const fileSmartEdits = smartEdits[item.filename];
+    handleDecision(itemToSave, "correct", fileSmartEdits);
+
+    // Cleanup
+    setEdits((prev) => {
+      const n = { ...prev };
+      delete n[item.filename];
+      return n;
+    });
+    setLiveTokens((prev) => {
+      const n = { ...prev };
+      delete n[item.filename];
+      return n;
+    });
+    setSmartEdits((prev) => {
+      const n = { ...prev };
+      delete n[item.filename];
+      return n;
+    });
+  };
+
+  const handleIncorrect = (item: any) => {
+    handleDecision(item, "incorrect");
+  };
+
+  const shouldExpand = (idx: number) => {
+    if (isBatchMode) return true;
+    if (autoTokenize && idx === 0) return true;
+    return false;
+  };
+
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (
-        !firstItem ||
+        e.target instanceof HTMLTextAreaElement &&
+        e.ctrlKey &&
+        e.code === "Enter" &&
+        firstItem
+      ) {
+        e.preventDefault();
+        handleCorrect(firstItem);
+        return;
+      }
+
+      if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
       )
         return;
+
+      if (!firstItem) return;
+
       if (e.code === "Space") {
-        e.preventDefault();
-        playAudio(firstItem);
-      }
-      if (e.code === "ShiftRight") {
         e.preventDefault();
         playAudio(firstItem);
       }
       if (e.code === "Enter") {
         e.preventDefault();
-        handleDecision(firstItem, "correct", smartEdits[firstItem.filename]);
-        setSmartEdits((prev) => {
-          const n = { ...prev };
-          delete n[firstItem.filename];
-          return n;
-        });
+        handleCorrect(firstItem);
       }
       if (e.code === "Backspace") {
         e.preventDefault();
-        handleDecision(firstItem, "incorrect");
+        handleIncorrect(firstItem);
       }
       if (e.code === "Slash" && e.ctrlKey) setIsGuideOpen((prev) => !prev);
     };
+
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [firstItem, playAudio, handleDecision, smartEdits]);
-
-  // Logic การขยายการ์ด
-  const shouldExpand = (idx: number) => {
-    // 1. ถ้ากด Cut All ไว้ (isBatchMode) -> ขยายทั้งหมด
-    if (isBatchMode) return true;
-    // 2. ถ้ไม่ได้กด Cut All แต่เปิด Auto Cut -> ขยายเฉพาะตัวแรก
-    if (autoTokenize && idx === 0) return true;
-    return false;
-  };
+  }, [firstItem, playAudio, edits, smartEdits]);
 
   if (pendingItems.length === 0) {
     return (
@@ -242,15 +366,12 @@ const AnnotationPage: React.FC = () => {
       </div>
     );
   }
-  
+
   return (
     <div className="anno-container animate-fade-in">
-      {/* --- Toolbar --- */}
       <div className="anno-toolbar">
         <div className="toolbar-left">
-          <h2 className="toolbar-title">Tool</h2>
-
-          {/* Toggle: Auto Play */}
+          <h2 className="toolbar-title">Annotation</h2>
           <label className="toggle-switch-wrapper">
             <input
               type="checkbox"
@@ -262,51 +383,35 @@ const AnnotationPage: React.FC = () => {
               <FastForward
                 size={14}
                 className={autoPlay ? "text-indigo-600" : ""}
-              />
+              />{" "}
               Auto Play
             </span>
           </label>
 
-          {/* Toggle: Auto Cut */}
           <label className="toggle-switch-wrapper">
             <input
               type="checkbox"
               checked={autoTokenize}
               onChange={(e) => setAutoTokenize(e.target.checked)}
-              disabled={isBatchMode} // Disable ถ้า Cut All เปิดอยู่
+              disabled={isBatchMode}
             />
-            <span
-              className={`toggle-slider ${isBatchMode ? "disabled" : ""}`}
-            ></span>
+            <span className={`toggle-slider ${isBatchMode ? "disabled" : ""}`}></span>
             <span className={`toggle-label ${isBatchMode ? "opacity-50" : ""}`}>
               <Zap
                 size={14}
-                className={
-                  autoTokenize && !isBatchMode ? "text-orange-500" : ""
-                }
-              />
+                className={autoTokenize && !isBatchMode ? "text-orange-500" : ""}
+              />{" "}
               Auto Cut
             </span>
           </label>
         </div>
 
         <div className="toolbar-right">
-          {/* Toggle: Cut All (Batch) */}
-          {employeeId === 'TN680058' && (
-          <button 
-            className="btn-batch-toggle" // ใช้ class เดียวกันจะได้สวยๆ หรือจะสร้างใหม่ก็ได้
-            onClick={() => setIsAnnounceModalOpen(true)}
-            title="Send Announcement"
-            style={{ marginRight: '8px', backgroundColor: '#fdf2f8', color: '#db2777', borderColor: '#fce7f3' }}
-          >
-            <Megaphone size={16} />
-            <span>Announce</span>
-          </button>
-          )}
           <button
             onClick={toggleBatchMode}
             disabled={isBatchLoading}
             className={`btn-batch-toggle ${isBatchMode ? "active" : ""}`}
+            style={{ marginRight: "8px" }}
           >
             {isBatchLoading ? (
               <Loader2 size={16} className="animate-spin" />
@@ -315,6 +420,20 @@ const AnnotationPage: React.FC = () => {
             )}
             <span>Cut All {isBatchMode ? "(ON)" : "(OFF)"}</span>
           </button>
+
+          {employeeId === "TN680058" && (
+            <button
+              className="btn-batch-toggle"
+              onClick={() => setIsAnnounceModalOpen(true)}
+              style={{
+                backgroundColor: "#fdf2f8",
+                color: "#db2777",
+                borderColor: "#fce7f3",
+              }}
+            >
+              <Megaphone size={16} /> <span>Announce</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -331,14 +450,27 @@ const AnnotationPage: React.FC = () => {
             <tbody>
               {items.map((item, idx) => {
                 const isPlaying = playingFile === item.filename;
-                const fileEdits = smartEdits[item.filename] || {};
+                const displayText =
+                  edits[item.filename] !== undefined
+                    ? edits[item.filename]
+                    : item.text;
+                const isSaving = savingFiles[item.filename];
+                const isDirty =
+                  edits[item.filename] !== undefined &&
+                  edits[item.filename] !== item.text;
+
                 const tokens =
-                  tokenCache.get(item.text) || batchTokens[item.filename];
+                  liveTokens[item.filename] ||
+                  batchTokens[item.filename] ||
+                  tokenCache.get(item.text);
+
+                const fileSmartEdits = smartEdits[item.filename] || {};
+                const isRefreshing = isTokenizing[item.filename];
                 const isExpanded = shouldExpand(idx);
 
                 return (
                   <tr key={item.filename}>
-                    <td>
+                    <td className="align-top py-3">
                       <div className="audio-cell-content">
                         <div className="filename-badge" title={item.filename}>
                           {item.filename}
@@ -358,7 +490,7 @@ const AnnotationPage: React.FC = () => {
                           )}
                         </button>
                         {item.audioPath && (
-                          <div className="w-full px-2">
+                          <div className="w-full px-2 mt-2">
                             <WaveformPlayer
                               audioUrl={item.audioPath}
                               isPlaying={isPlaying}
@@ -373,54 +505,117 @@ const AnnotationPage: React.FC = () => {
                       </div>
                     </td>
 
-                    <td>
-                      <TokenizedText
-                        text={item.text}
-                        onInspect={inspectText}
-                        tokens={tokens}
-                        isExpanded={isExpanded}
-                        suggestions={suggestions}
-                        appliedEdits={fileEdits}
-                        onApplyCorrection={(i, word) =>
-                          handleSmartCorrection(item.filename, i, word)
-                        }
-                      />
+                    <td className="align-top py-3">
+                      <div className="flex flex-col gap-3">
+                        <div className="relative">
+                          <textarea
+                            className={`transcript-textarea ${isDirty ? "dirty" : ""}`}
+                            value={displayText}
+                            onChange={(e) =>
+                              handleTextChange(item.filename, e.target.value)
+                            }
+                            placeholder="Transcribe here..."
+                            rows={2}
+                            disabled={isSaving}
+                          />
+                          {isDirty && (
+                                    <>
+                                      {/* Badge: เปลี่ยนมาใช้ Class .badge-edited */}
+                                      <div className="badge-edited">
+                                        <span>
+                                          {isRefreshing ? "CUTTING..." : "EDITED"}
+                                        </span>
+                                      </div>
+                                      
+                                      {/* Button: เปลี่ยนมาใช้ Class .btn-reset-input */}
+                                      <button
+                                        onClick={() => handleReset(item.filename)}
+                                        className="btn-reset-input"
+                                        title="Reset to Original"
+                                      >
+                                        <RotateCcw size={12} />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+
+                        <div
+                          className={`token-view-wrapper ${isRefreshing ? "opacity-50" : ""}`}
+                        >
+                          <div className="flex justify-between items-center mb-1">
+                            <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider"></div>
+                            {(isRefreshing || (!tokens && isBatchLoading && isExpanded)) && (
+                              <Loader2
+                                size={10}
+                                className="animate-spin text-slate-400"
+                              />
+                            )}
+                          </div>
+
+                          {tokens ? (
+                            <TokenizedText
+                              text={item.text}
+                              onInspect={inspectText}
+                              tokens={tokens}
+                              isExpanded={isExpanded}
+                              suggestions={suggestions}
+                              appliedEdits={fileSmartEdits}
+                              onApplyCorrection={(i, word) =>
+                                handleSmartCorrection(
+                                  item.filename,
+                                  i,
+                                  word,
+                                  tokens,
+                                )
+                              }
+                            />
+                          ) : (
+                             isExpanded && isBatchLoading ? (
+                                <div className="text-sm text-slate-400 italic p-2">
+                                  Loading cutter...
+                                </div>
+                             ) : null
+                          )}
+                        </div>
+                      </div>
                     </td>
 
-                    <td>
-                      <div className="action-wrapper">
-                                                <button
-                        className="btn-trash-float"
-                        title="Delete to trash"
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setItemToDelete(item);
-                        }}
-                      >
-                        <Trash2 size={12} />
+                    <td className="align-top py-3">
+                      <div className="action-wrapper h-full justify-start pt-1">
+                        <button
+                          className="btn-trash-float"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setItemToDelete(item);
+                          }}
+                        >
+                          <Trash2 size={12} />
                         </button>
 
-                        <div className="decision-group">
+                        <div className="decision-group flex-col gap-2 w-full">
                           <button
-                            onClick={() => {
-                              handleDecision(item, "correct", fileEdits);
-                              setSmartEdits((prev) => {
-                                const n = { ...prev };
-                                delete n[item.filename];
-                                return n;
-                              });
-                            }}
-                            className="btn-action correct"
-                            title="Correct (Enter)"
+                            onClick={() => handleCorrect(item)}
+                            disabled={isSaving}
+                            className={`btn-action correct w-full justify-center ${isSaving ? "opacity-50" : ""}`}
+                            title="Save & Correct (Enter)"
                           >
-                            <Check size={20} strokeWidth={3} />
+                            {isSaving ? (
+                              <Loader2 size={20} className="animate-spin" />
+                            ) : (
+                              <Check size={20} strokeWidth={3} />
+                            )}
+                            <span className="ml-1 text-sm">
+                            </span>
                           </button>
+
                           <button
-                            onClick={() => handleDecision(item, "incorrect")}
-                            className="btn-action incorrect"
+                            onClick={() => handleIncorrect(item)}
+                            disabled={isSaving}
+                            className="btn-action incorrect w-full justify-center"
                             title="Incorrect (Backspace)"
                           >
                             <X size={20} strokeWidth={3} />
+                            <span className="ml-1 text-sm"></span>
                           </button>
                         </div>
                       </div>
@@ -440,85 +635,86 @@ const AnnotationPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Panel */}
         <aside
           className={`guideline-panel ${!isGuideOpen ? "collapsed" : ""}`}
           onClick={() => !isGuideOpen && setIsGuideOpen(true)}
         >
-          <GuidelinePanel 
-            isOpen={isGuideOpen} 
+          <GuidelinePanel
+            isOpen={isGuideOpen}
             onToggle={setIsGuideOpen}
             type="annotation"
           />
         </aside>
       </div>
-        <Modal
-          isOpen={!!itemToDelete}
-          type="confirm"
-          title="Confirm Deletion"
-          message={`Are you sure you want to move "${itemToDelete?.filename}" to trash?`}
-          onClose={() => setItemToDelete(null)}
-          actions={[
-            {
-              label: "Cancel",
-              onClick: () => setItemToDelete(null),
-              variant: "secondary",
-            },
-            {
-              label: "Delete",
-              onClick: handleConfirmDelete,
-              variant: "danger", // สีแดง
-            },
-          ]}
-        />
-        <Modal
-      isOpen={isAnnounceModalOpen}
-      type="confirm"
-      title="Broadcast Announcement"
-      message={
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-slate-500">Message will popup for ALL active users.</p>
-          <textarea 
-            className="w-full border rounded p-2 text-slate-700 focus:outline-indigo-500"
-            rows={3}
-            placeholder="Example: Server restarting in 5 mins..."
-            value={announceText}
-            onChange={e => setAnnounceText(e.target.value)}
-          />
-        </div>
-      }
-      onClose={() => setIsAnnounceModalOpen(false)}
-      actions={[
-        { label: "Cancel", onClick: () => setIsAnnounceModalOpen(false), variant: "secondary" },
-        { 
-          label: "Broadcast", 
-          onClick: async () => {
-            if(!announceText.trim()) return;
-            await broadcastMessage(announceText);
-            setAnnounceText("");
-            setIsAnnounceModalOpen(false);
-          }, 
-          variant: "danger" // ใช้สีแดง/ชมพูให้ดูสำคัญ
-        },
-      ]}
-    />
 
-    {/* --- Modal 2: สำหรับคนรับ (Receiver Popup) --- */}
-    {/* อันนี้จะเด้งเองอัตโนมัติเมื่อ incomingAnnouncement ใน Context เปลี่ยนค่า */}
-    <Modal
-      isOpen={!!incomingAnnouncement}
-      type="alert" // หรือ type info ถ้าคุณมี
-      title={`📢 Announcement from ${incomingAnnouncement?.sender || 'System'}`}
-      message={
-        <div className="text-lg font-medium text-center py-4 text-slate-700">
-          {incomingAnnouncement?.text}
-        </div>
-      }
-      onClose={dismissAnnouncement}
-      actions={[
-        { label: "Got it", onClick: dismissAnnouncement, variant: "primary" }
-      ]}
-    />
+      <Modal
+        isOpen={!!itemToDelete}
+        type="confirm"
+        title="Confirm Deletion"
+        message={`Move "${itemToDelete?.filename}" to trash?`}
+        onClose={() => setItemToDelete(null)}
+        actions={[
+          {
+            label: "Cancel",
+            onClick: () => setItemToDelete(null),
+            variant: "secondary",
+          },
+          {
+            label: "Delete",
+            onClick: async () => {
+              await audioService.appendTsv("trash.tsv", itemToDelete);
+              setAudioFiles((prev) =>
+                prev.filter((f) => f.filename !== itemToDelete.filename),
+              );
+              setItemToDelete(null);
+            },
+            variant: "danger",
+          },
+        ]}
+      />
+
+      <Modal
+        isOpen={isAnnounceModalOpen}
+        type="confirm"
+        title="Broadcast Announcement"
+        message={
+          <textarea
+            className="w-full border rounded p-2"
+            rows={3}
+            value={announceText}
+            onChange={(e) => setAnnounceText(e.target.value)}
+          />
+        }
+        onClose={() => setIsAnnounceModalOpen(false)}
+        actions={[
+          {
+            label: "Cancel",
+            onClick: () => setIsAnnounceModalOpen(false),
+            variant: "secondary",
+          },
+          {
+            label: "Broadcast",
+            onClick: async () => {
+              await broadcastMessage(announceText);
+              setIsAnnounceModalOpen(false);
+            },
+            variant: "danger",
+          },
+        ]}
+      />
+
+      <Modal
+        isOpen={!!incomingAnnouncement}
+        type="alert"
+        title={`📢 Message`}
+        message={
+          <div className="text-center py-4">{incomingAnnouncement?.text}</div>
+        }
+        onClose={dismissAnnouncement}
+        actions={[
+          { label: "Got it", onClick: dismissAnnouncement, variant: "primary" },
+        ]}
+      />
     </div>
   );
 };
