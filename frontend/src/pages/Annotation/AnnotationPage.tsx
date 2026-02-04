@@ -103,12 +103,10 @@ const AnnotationPage: React.FC = () => {
   // Auto Fetch on Mount
   useEffect(() => {
     const fetchInitialTokens = async () => {
+      // ✅ แก้คืน: ให้โหลด Token ของ "ทุก Item" ในหน้านี้ (ถ้ายังไม่มีใน Cache)
+      // ไม่ต้องรอ autoTokenize หรือเช็คว่าเป็นตัวแรก
       const itemsToFetch = items.filter(
-        (item, idx) => {
-           const neededForAuto = autoTokenize && idx === 0;
-           const notInCache = !tokenCache.has(item.text) && !batchTokens[item.filename];
-           return neededForAuto && notInCache;
-        }
+        (item) => !tokenCache.has(item.text) && !batchTokens[item.filename]
       );
 
       if (itemsToFetch.length === 0) return;
@@ -127,7 +125,7 @@ const AnnotationPage: React.FC = () => {
     };
 
     fetchInitialTokens();
-  }, [items, tokenCache, autoTokenize]);
+  }, [items, tokenCache]); // เอา autoTokenize ออกจาก dependency
 
   // Real-time Tokenizer (Typing)
   useEffect(() => {
