@@ -109,6 +109,7 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         localforage.setItem('cached_correct', serverData.correct.reverse());
         localforage.setItem('cached_fail', serverData.fail.reverse());
         localforage.setItem('cached_changes', serverData.changes);
+        localforage.setItem('cached_trash', serverData.trash || []);
     } else {
         // Offline: ดึงจาก Cache
         console.log("Offline or Server Down: Loading cached data.");
@@ -116,10 +117,12 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             const cachedCorrect = await localforage.getItem<AudioItem[]>('cached_correct');
             const cachedFail = await localforage.getItem<AudioItem[]>('cached_fail');
             const cachedChanges = await localforage.getItem<any[]>('cached_changes');
+            const cachedTrash = await localforage.getItem<AudioItem[]>('cached_trash');
 
             if (cachedCorrect) setCorrectData(cachedCorrect);
             if (cachedFail) setIncorrectData(cachedFail);
             if (cachedChanges) setChanges(cachedChanges);
+            if (cachedTrash) setTrashData(cachedTrash);
         } catch (err) {
             console.error("Cache load error:", err);
         }
@@ -174,20 +177,21 @@ export const AnnotationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 //   localStorage.setItem('cached_changes', JSON.stringify(changes));
 // }, [correctData, incorrectData, changes]);
 useEffect(() => {
-  const saveDataLocally = async () => {
-      try {
-          await Promise.all([
-              localforage.setItem('cached_correct', correctData),
-              localforage.setItem('cached_fail', incorrectData),
-              localforage.setItem('cached_changes', changes)
-          ]);
-      } catch (err) {
-          console.error("Error saving local cache:", err);
-      }
-  };
-  saveDataLocally();
-}, [correctData, incorrectData, changes]);
-
+    const saveDataLocally = async () => {
+        try {
+            await Promise.all([
+                localforage.setItem('cached_correct', correctData),
+                localforage.setItem('cached_fail', incorrectData),
+                localforage.setItem('cached_changes', changes),
+                // ✅ [เพิ่ม] บันทึก Trash
+                localforage.setItem('cached_trash', trashData)
+            ]);
+        } catch (err) {
+            console.error("Error saving local cache:", err);
+        }
+    };
+    saveDataLocally();
+  }, [correctData, incorrectData, changes, trashData]);
   // 2. Initial Load Data (ปรับปรุงจากเดิม)
   useEffect(() => {
     if (!employeeId) return;

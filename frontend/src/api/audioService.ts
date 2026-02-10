@@ -241,7 +241,7 @@ export const audioService = {
     if (!pyThaiNLPService.isReady()) {
       try { await pyThaiNLPService.init(); } catch { }
     }
-    const results = texts.map(t => pyThaiNLPService.tokenize(t));
+   const results = await Promise.all(texts.map(t => pyThaiNLPService.tokenize(t)));
     return { results };
   },
 
