@@ -22,13 +22,13 @@ export const GuidelinePanel: React.FC<GuidePanelProps> = ({
   // Default content สำหรับ EditPage
   const editDefaultContent = (
     <div className="guide-content">
-      {/* <div className="guide-item">
+      <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
           คำซ้ำใช้ <span className="highlight">ๆ</span>{" "}
           <div className="text-slate-400 text-xs">"อื่นๆ", "ไปๆ มาๆ"</div>
         </div>
-      </div> */}
+      </div>
       <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
@@ -103,13 +103,13 @@ export const GuidelinePanel: React.FC<GuidePanelProps> = ({
   // Default content สำหรับ AnnotationPage
   const annotationDefaultContent = (
     <div className="guide-content">
-      {/* <div className="guide-item">
+      <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
           คำซ้ำใช้ <span className="highlight">ๆ</span>{" "}
           <div className="text-slate-400 text-xs">"อื่นๆ", "ไปๆ มาๆ"</div>
         </div>
-      </div> */}
+      </div>
       <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
