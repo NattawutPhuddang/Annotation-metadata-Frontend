@@ -22,13 +22,13 @@ export const GuidelinePanel: React.FC<GuidePanelProps> = ({
   // Default content สำหรับ EditPage
   const editDefaultContent = (
     <div className="guide-content">
-      <div className="guide-item">
+      {/* <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
           คำซ้ำใช้ <span className="highlight">ๆ</span>{" "}
           <div className="text-slate-400 text-xs">"อื่นๆ", "ไปๆ มาๆ"</div>
         </div>
-      </div>
+      </div> */}
       <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
@@ -36,7 +36,7 @@ export const GuidelinePanel: React.FC<GuidePanelProps> = ({
           <div className="text-slate-400 text-xs">"จังหวัดกาญฯ"</div>
         </div>
       </div>
-      <div className="guide-item">
+      {/* <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
           หนึ่งสอง ใช้{" "}
@@ -44,7 +44,7 @@ export const GuidelinePanel: React.FC<GuidePanelProps> = ({
           <div className="text-slate-400 text-xs">"10คน", "10:30"</div>
           ยกเว้นชื่อเฉพาะ "คลองหนึ่ง"
         </div>
-      </div>
+      </div> */}
       <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
@@ -55,7 +55,7 @@ export const GuidelinePanel: React.FC<GuidePanelProps> = ({
         </div>
       </div>
 
-     <div className="guide-item">
+     {/* <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
           เปลี่ยนแปลง{" "}
@@ -69,7 +69,7 @@ export const GuidelinePanel: React.FC<GuidePanelProps> = ({
           <div className="text-slate-400 text-xs">"ยี่สิบห้ายี่สิบหก" → "25,26"</div>
           <div className="text-slate-400 text-xs">"สองแสน" → "2แสน"</div>
         </div>
-      </div>
+      </div> */}
 
       <div className="guide-item">
         <div
@@ -103,13 +103,13 @@ export const GuidelinePanel: React.FC<GuidePanelProps> = ({
   // Default content สำหรับ AnnotationPage
   const annotationDefaultContent = (
     <div className="guide-content">
-      <div className="guide-item">
+      {/* <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
           คำซ้ำใช้ <span className="highlight">ๆ</span>{" "}
           <div className="text-slate-400 text-xs">"อื่นๆ", "ไปๆ มาๆ"</div>
         </div>
-      </div>
+      </div> */}
       <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
@@ -117,14 +117,14 @@ export const GuidelinePanel: React.FC<GuidePanelProps> = ({
           <div className="text-slate-400 text-xs">"จังหวัดกาญฯ"</div>
         </div>
       </div>
-      <div className="guide-item">
+      {/* <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
           หนึ่งสอง ใช้ <span className="highlight">ตัวเลขอารบิก</span>{" "}
           <div className="text-slate-400 text-xs">"10คน", "10:30"</div>
           ยกเว้นชื่อเฉพาะ "คลองหนึ่ง"
         </div>
-      </div>
+      </div> */}
       <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
@@ -134,7 +134,7 @@ export const GuidelinePanel: React.FC<GuidePanelProps> = ({
           </span>
         </div>
       </div>
-      <div className="guide-item">
+      {/* <div className="guide-item">
         <div className="guide-icon"></div>
         <div>
           เปลี่ยนแปลง{" "}
@@ -148,7 +148,7 @@ export const GuidelinePanel: React.FC<GuidePanelProps> = ({
           <div className="text-slate-400 text-xs">"ยี่สิบห้ายี่สิบหก" → "25,26"</div>
           <div className="text-slate-400 text-xs">"สองแสน" → "2แสน"</div>
         </div>
-      </div>
+      </div> */}
       <div className="shortcut-grid">
         <div className="shortcut-item">
           <span className="flex items-center gap-2 text-slate-500">
