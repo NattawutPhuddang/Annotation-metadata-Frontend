@@ -41,7 +41,7 @@ interface AnnotationContextType {
   // Actions
   handleDecision: (item: AudioItem, status: "correct" | "incorrect", smartEdits?: Record<number, string>) => Promise<void>;
   handleCorrection: (item: AudioItem, newText: string) => Promise<void>;
-  moveToTrash: (filename: string, source?: "correct" | "incorrect") => Promise<void>;
+  moveToTrash: (filename: string, source?: "correct" | "incorrect" | "pending") => Promise<void>;
   playAudio: (item: AudioItem) => void;
   playingFile: string | null;
   getFileName: (base: string) => string;
@@ -207,6 +207,7 @@ useEffect(() => {
            console.log("Online Mode: Loaded from server");
             setCorrectData(serverData.correct.reverse());
             setIncorrectData(serverData.fail.reverse());
+            setTrashData(serverData.trash || []);
             setChanges(serverData.changes);
         } else {
             // 🔴 ถ้าไม่มีเน็ต (Offline): ดึงจาก LocalStorage ที่เราเซฟไว้
@@ -214,10 +215,12 @@ useEffect(() => {
             const cachedCorrect = localStorage.getItem('cached_correct');
             const cachedFail = localStorage.getItem('cached_fail');
             const cachedChanges = localStorage.getItem('cached_changes');
+            const cachedTrash = await localforage.getItem<AudioItem[]>('cached_trash');
 
             if (cachedCorrect) setCorrectData(JSON.parse(cachedCorrect));
             if (cachedFail) setIncorrectData(JSON.parse(cachedFail));
             if (cachedChanges) setChanges(JSON.parse(cachedChanges));
+            if (cachedTrash) setTrashData(cachedTrash);
         }
         
         setLoading(false);
@@ -592,34 +595,37 @@ const dismissAnnouncement = () => {
     return map;
   }, [changes]);
 
-  const moveToTrash = async (filename: string, source: "correct" | "incorrect" = "incorrect") => {
+  const moveToTrash = async (filename: string, source: "correct" | "incorrect" | "pending" = "incorrect") => {
     try {
-      // 1. เรียก API ย้ายไฟล์ (Backend ต้องแก้แล้วตามขั้นตอนก่อนหน้า)
-      await audioService.moveToTrash(filename, source === "correct" ? "Correct.tsv" : "fail.tsv");
+      // 1. จัดการย้ายไฟล์ตาม Source
+      if (source === "pending") {
+          // ถ้ามาจากหน้า Pending (AnnotationPage) ให้เอาใส่ trash.tsv เลย
+          const item = audioFiles.find(f => f.filename === filename);
+          if (item) await audioService.appendTsv("trash.tsv", item);
+      } else {
+          // หน้า Correct/Incorrect มี Backend จัดการ
+          await audioService.moveToTrash(filename, source === "correct" ? "Correct.tsv" : "fail.tsv");
+      }
       
-      // 2. หาข้อมูล item นั้นเพื่อเอามาใส่ใน trashData state
-      // (ค้นหาจากทุกที่เพราะบางทีอาจจะเพิ่งโหลดมา)
       const item = audioFiles.find(f => f.filename === filename) || 
                    incorrectData.find(f => f.filename === filename) || 
                    correctData.find(f => f.filename === filename) || 
-                   { filename, text: "" }; // Fallback ถ้าหาไม่เจอ
+                   { filename, text: "" };
 
-      // 3. Update State: เพิ่มลง Trash Data (เพื่อเอาไปหักลบกับ Pending)
+      // 2. อัปเดต Trash State ให้ Pending Filter ทำงานได้
       setTrashData(prev => {
-          // กันซ้ำ
           if (prev.some(t => t.filename === filename)) return prev;
           return [...prev, item];
       });
 
-      // 4. Update State: ลบออกจาก Source เดิม (Correct/Fail)
+      // 3. เอาข้อมูลออกจาก State ต้นทาง
       if (source === "correct") {
         setCorrectData(prev => prev.filter(i => i.filename !== filename));
-      } else {
+      } else if (source === "incorrect") {
         setIncorrectData(prev => prev.filter(i => i.filename !== filename));
+      } else {
+        setAudioFiles(prev => prev.filter(f => f.filename !== filename));
       }
-      
-      // ลบออกจาก audioFiles หลักด้วย (เผื่อกรณีมันยังค้างอยู่)
-      // setAudioFiles(prev => prev.filter(f => f.filename !== filename)); 
 
     } catch (error) {
       console.error("Failed to move to trash", error);
