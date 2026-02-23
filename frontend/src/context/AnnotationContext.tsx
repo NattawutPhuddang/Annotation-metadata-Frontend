@@ -563,18 +563,25 @@ const dismissAnnouncement = () => {
   };
 
   // Derived State: Pending Items
-  const pendingItems = useMemo(() => {
-    // Enrich with audio URL logic on the fly or pre-process
-    // For simplicity, let's filter first
+ const pendingItems = useMemo(() => {
+    // 🚀 1. OPTIMIZATION: ใช้ Set แทน array.some() เพื่อให้ค้นหาได้ไวขึ้น O(1) ช่วยแก้ปัญหาหน้าเว็บหน่วง
+    const processedFiles = new Set<string>();
+    
+    // นำรายชื่อไฟล์ที่จัดการแล้ว/ลบแล้ว ใส่ลงไปใน Set ให้หมด
+    for (const c of correctData) processedFiles.add(c.filename);
+    for (const f of incorrectData) processedFiles.add(f.filename);
+    for (const t of trashData) processedFiles.add(t.filename);
+
+    // 🚀 2. กรองเฉพาะไฟล์ที่ 'ไม่มีรายชื่อ' อยู่ใน Set 
     const rawPending = audioFiles.filter(
-      (i) => !correctData.some((c) => c.filename === i.filename) &&
-             !incorrectData.some((f) => f.filename === i.filename)&&
-             !trashData.some((t) => t.filename === i.filename)
+      (i) => !processedFiles.has(i.filename)
     );
     
-    // Enrich Logic (Move here to avoid clutter in Component)
+    // 3. แนบ Audio Path (เหมือนโค้ดเดิม)
     const fileMap = new Map<string, string>();
-    audioFiles.forEach(f => { if(f.audioPath) fileMap.set(f.filename, f.audioPath) });
+    for (const f of audioFiles) {
+        if (f.audioPath) fileMap.set(f.filename, f.audioPath);
+    }
 
     return rawPending.map(i => {
          let src = i.audioPath;
@@ -584,7 +591,7 @@ const dismissAnnouncement = () => {
          }
          return { ...i, audioPath: src };
     });
-  }, [audioFiles, correctData, incorrectData,trashData]);
+  }, [audioFiles, correctData, incorrectData, trashData]);
 
   // Create suggestions map from changes for O(1) lookup
   const suggestions = useMemo(() => {
