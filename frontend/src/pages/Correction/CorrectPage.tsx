@@ -83,7 +83,7 @@ const CorrectPage: React.FC = () => {
     const filename = `${employeeId}-Correct.tsv`;
     try {
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL || "http://10.2.98.000:3003"}/api/load-file?filename=${filename}`,
+        `${process.env.REACT_APP_API_URL || "http://10.2.98.159:3003"}/api/load-file?filename=${filename}`,
       );
       if (!res.ok) {
         alert("Personal log not found.");
