@@ -1,2 +1,2 @@
 // src/api/client.ts
-export const API_BASE = process.env.REACT_APP_API_URL || "http://10.2.98.159:3003";
+export const API_BASE = process.env.REACT_APP_API_URL || "http://10.2.98.000:3003";
